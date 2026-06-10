@@ -189,6 +189,48 @@ fn build_provider_row(entry: ProviderEntry, store: Arc<Mutex<ConfigStore>>) -> l
     api_row.add_suffix(&diag_btn);
     row.add_row(&api_row);
 
+    // Automatic browser cookie import for cookie-only (category-2) providers.
+    if crate::web::supports_cookie_import(&id) {
+        let import_row = ActionRow::builder()
+            .title("Browser cookies")
+            .subtitle("Import session cookies from your browser (Chrome/Chromium/Brave/Edge/Firefox)")
+            .build();
+        let import_btn = gtk4::Button::builder()
+            .label("Import from browser")
+            .valign(gtk4::Align::Center)
+            .build();
+        let store2 = store.clone();
+        let entry2 = entry.clone();
+        let id2 = id.clone();
+        import_btn.connect_clicked(move |btn| {
+            match crate::web::import_cookie_header(&id2) {
+                Ok(header) => {
+                    {
+                        let mut e = entry2.borrow_mut();
+                        e.set_str("cookieSource", Some("manual"));
+                        e.set_str("cookieHeader", Some(&header));
+                    }
+                    persist(&store2, &entry2.borrow());
+                    show_info(
+                        btn,
+                        "Cookies imported",
+                        "Session cookies were imported and saved. The provider will use them on the next refresh.",
+                    );
+                }
+                Err(e) => show_info(
+                    btn,
+                    "Cookie import failed",
+                    &format!(
+                        "{e}\n\nYou can paste a cookie header manually instead: open the provider site \
+in your browser, copy the request `Cookie:` header from DevTools, and set Cookie source = manual."
+                    ),
+                ),
+            }
+        });
+        import_row.add_suffix(&import_btn);
+        row.add_row(&import_row);
+    }
+
     row
 }
 

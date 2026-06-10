@@ -24,6 +24,16 @@ anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
 
+# Linux browser cookie import (Phase 4)
+rusqlite = { version = "0.32", features = ["bundled"] }
+aes-gcm = "0.10"
+cbc = "0.1"
+aes = "0.8"
+pbkdf2 = "0.12"
+sha1 = "0.10"
+hmac = "0.12"
+secret-service = { version = "4", default-features = false, features = ["rt-tokio-crypto-rust"] }
+
 [profile.release]
 opt-level = 2
 strip = true

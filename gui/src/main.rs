@@ -16,6 +16,7 @@ mod popover;
 mod providers;
 mod settings;
 mod tray;
+mod web;
 
 use config_store::ConfigStore;
 use engine_client::EngineClient;
