@@ -44,6 +44,37 @@ pub fn remaining_label(remaining_percent: f64) -> String {
     format!("{}% left", remaining_percent.round() as i64)
 }
 
+/// Pace label comparing consumption against time elapsed in the window, mirroring
+/// the macOS `UsagePaceText`. Returns `None` when the window lacks the timing
+/// data needed to project (no `window_minutes` or no `resets_at`).
+///
+/// Burn ratio = used% / elapsed%. >1 means spending faster than the clock, so
+/// the quota will run out before reset; <1 means it will last.
+pub fn pace_label(used_percent: f64, window_minutes: Option<i64>, resets_at: Option<&str>) -> Option<String> {
+    let window_minutes = window_minutes? as f64;
+    if window_minutes <= 0.0 {
+        return None;
+    }
+    let iso = resets_at?;
+    let dt = DateTime::parse_from_rfc3339(iso).ok()?.with_timezone(&Utc);
+    let remaining_secs = (dt - Utc::now()).num_seconds().max(0) as f64;
+    let elapsed_min = (window_minutes - remaining_secs / 60.0).clamp(0.0, window_minutes);
+    let elapsed_frac = elapsed_min / window_minutes;
+    if elapsed_frac <= 0.01 {
+        return None; // too early in the window to project meaningfully
+    }
+    let used_frac = (used_percent / 100.0).clamp(0.0, 1.0);
+    let ratio = used_frac / elapsed_frac;
+    let label = if ratio >= 1.25 {
+        "ahead of pace — may run out early"
+    } else if ratio <= 0.75 {
+        "behind pace — quota to spare"
+    } else {
+        "on pace"
+    };
+    Some(label.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +97,27 @@ mod tests {
     fn past_reset_is_now() {
         let past = (Utc::now() - chrono::Duration::seconds(5)).to_rfc3339();
         assert_eq!(reset_label(Some(&past), None).unwrap(), "resetting now");
+    }
+
+    #[test]
+    fn pace_needs_timing_data() {
+        assert!(pace_label(50.0, None, None).is_none());
+        assert!(pace_label(50.0, Some(300), None).is_none());
+    }
+
+    #[test]
+    fn pace_flags_fast_burn() {
+        // Window 300m, 90% elapsed remaining => 10% elapsed, but 80% used => ahead.
+        let resets = (Utc::now() + chrono::Duration::minutes(270)).to_rfc3339();
+        let s = pace_label(80.0, Some(300), Some(&resets)).unwrap();
+        assert_eq!(s, "ahead of pace — may run out early");
+    }
+
+    #[test]
+    fn pace_flags_slow_burn() {
+        // 90% elapsed, only 10% used => behind pace.
+        let resets = (Utc::now() + chrono::Duration::minutes(30)).to_rfc3339();
+        let s = pace_label(10.0, Some(300), Some(&resets)).unwrap();
+        assert_eq!(s, "behind pace — quota to spare");
     }
 }

@@ -2,7 +2,7 @@
 //! from the latest engine snapshot. Built imperatively so it can be rebuilt on
 //! each refresh.
 
-use crate::format::{remaining_label, reset_label};
+use crate::format::{pace_label, remaining_label, reset_label};
 use crate::model::ProviderPayload;
 use crate::providers::branding;
 use gtk4::prelude::*;
@@ -189,6 +189,14 @@ fn append_window(card: &GtkBox, name: &str, window: Option<&crate::model::RateWi
         r.add_css_class("caption");
         r.set_halign(Align::Start);
         row.append(&r);
+    }
+
+    if let Some(pace) = pace_label(w.used_percent, w.window_minutes, w.resets_at.as_deref()) {
+        let p = Label::new(Some(&pace));
+        p.add_css_class("dim-label");
+        p.add_css_class("caption");
+        p.set_halign(Align::Start);
+        row.append(&p);
     }
 
     card.append(&row);
