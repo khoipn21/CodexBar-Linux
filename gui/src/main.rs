@@ -118,6 +118,7 @@ fn build_ui(
     let refresh: Rc<dyn Fn()> = {
         let app = app.clone();
         let engine = engine.clone();
+        let config = config.clone();
         let payloads = payloads.clone();
         let notified = notified.clone();
         let scroller = scroller.clone();
@@ -128,7 +129,15 @@ fn build_ui(
                 Ok(list) => {
                     *payloads.borrow_mut() = list.clone();
                     scroller.set_child(Some(&popover::build_provider_list(&list)));
-                    update_tray(&tray_handle, &list);
+                    let metric = TrayMetric::from_label(
+                        config
+                            .lock()
+                            .ok()
+                            .and_then(|c| c.get_app_field("trayMetric"))
+                            .and_then(|v| v.as_str().map(str::to_string))
+                            .as_deref(),
+                    );
+                    update_tray(&tray_handle, &list, metric);
                     notifications::publish(&app, &list, &mut notified.borrow_mut());
                 }
                 Err(e) => {
@@ -234,20 +243,70 @@ fn clone_window(w: &RateWindow) -> RateWindow {
     }
 }
 
-/// Pick the most-urgent provider (lowest remaining%) and update the tray icon.
-fn update_tray(handle: &TrayHandle, list: &[ProviderPayload]) {
+/// Tray metric selection, mirroring the macOS menu-bar display modes. Stored as
+/// a string under `linuxGui.trayMetric` in the shared config.
+#[derive(Debug, Clone, Copy)]
+enum TrayMetric {
+    LowestRemaining,
+    HighestUsage,
+    CodexSession,
+    CodexWeekly,
+    Credits,
+}
+
+impl TrayMetric {
+    fn from_label(label: Option<&str>) -> Self {
+        match label {
+            Some("Highest usage") => TrayMetric::HighestUsage,
+            Some("Codex session") => TrayMetric::CodexSession,
+            Some("Codex weekly") => TrayMetric::CodexWeekly,
+            Some("Credits") => TrayMetric::Credits,
+            _ => TrayMetric::LowestRemaining,
+        }
+    }
+}
+
+fn pick_metric_window(metric: TrayMetric, p: &ProviderPayload) -> Option<&RateWindow> {
+    match metric {
+        TrayMetric::CodexSession if p.provider == "codex" => {
+            p.usage.as_ref().and_then(|u| u.primary.as_ref())
+        }
+        TrayMetric::CodexWeekly if p.provider == "codex" => {
+            p.usage.as_ref().and_then(|u| u.secondary.as_ref())
+        }
+        TrayMetric::CodexSession | TrayMetric::CodexWeekly => None,
+        _ => p.headline_window(),
+    }
+}
+
+/// Resolve the (remaining%, color, window, incident) headline for the chosen metric.
+fn headline_for(
+    metric: TrayMetric,
+    list: &[ProviderPayload],
+) -> Option<(f64, providers::Rgb, RateWindow, bool)> {
     let mut headline: Option<(f64, providers::Rgb, RateWindow, bool)> = None;
     for p in list {
         let incident = p.status.as_ref().map(|s| s.is_incident()).unwrap_or(false);
-        if let Some(w) = p.headline_window() {
-            let remaining = w.remaining_percent();
-            let color = providers::branding(&p.provider).color;
-            let better = headline.as_ref().map(|(r, ..)| remaining < *r).unwrap_or(true);
-            if better {
-                headline = Some((remaining, color, clone_window(w), incident));
+        let Some(w) = pick_metric_window(metric, p) else { continue };
+        let remaining = w.remaining_percent();
+        let color = providers::branding(&p.provider).color;
+        let better = match metric {
+            // Highest usage = lowest remaining, same comparison but kept explicit.
+            TrayMetric::HighestUsage | TrayMetric::LowestRemaining => {
+                headline.as_ref().map(|(r, ..)| remaining < *r).unwrap_or(true)
             }
+            _ => headline.is_none(),
+        };
+        if better {
+            headline = Some((remaining, color, clone_window(w), incident));
         }
     }
+    headline
+}
+
+/// Update the tray icon and menu for the selected metric.
+fn update_tray(handle: &TrayHandle, list: &[ProviderPayload], metric: TrayMetric) {
+    let headline = headline_for(metric, list);
 
     let (tooltip, opts, window) = match headline {
         Some((remaining, color, window, incident)) => (
