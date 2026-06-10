@@ -37,7 +37,7 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
     let b = branding(&p.provider);
     let card = GtkBox::new(Orientation::Vertical, 4);
 
-    // Header: provider name + optional account.
+    // Header: provider name + optional account + copy affordance.
     let header = GtkBox::new(Orientation::Horizontal, 6);
     let dot = color_dot(&b.color);
     header.append(&dot);
@@ -57,7 +57,25 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
         a.set_halign(Align::End);
         a.set_hexpand(true);
         header.append(&a);
+    } else {
+        // Keep the copy button pinned to the trailing edge.
+        let spacer = GtkBox::new(Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        header.append(&spacer);
     }
+
+    // Click-to-copy: copies a one-line summary of this provider to the clipboard.
+    let copy = gtk4::Button::builder()
+        .icon_name("edit-copy-symbolic")
+        .tooltip_text("Copy usage summary")
+        .valign(Align::Center)
+        .has_frame(false)
+        .build();
+    let summary = summary_line(&b.display_name, p);
+    copy.connect_clicked(move |btn| {
+        btn.clipboard().set_text(&summary);
+    });
+    header.append(&copy);
     card.append(&header);
 
     // Error state: show the engine message (e.g. macOS-web ceiling).
@@ -110,6 +128,34 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
     }
 
     card
+}
+
+fn summary_line(name: &str, p: &ProviderPayload) -> String {
+    if let Some(err) = &p.error {
+        return format!("{name}: {}", err.message);
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(u) = &p.usage {
+        for (label, win) in [
+            ("session", u.primary.as_ref()),
+            ("weekly", u.secondary.as_ref()),
+            ("extra", u.tertiary.as_ref()),
+        ] {
+            if let Some(w) = win {
+                parts.push(format!("{label} {}% left", w.remaining_percent().round() as i64));
+            }
+        }
+    }
+    if let Some(c) = &p.credits {
+        if c.remaining != 0.0 {
+            parts.push(format!("{:.2} credits", c.remaining));
+        }
+    }
+    if parts.is_empty() {
+        format!("{name}: no usage data")
+    } else {
+        format!("{name}: {}", parts.join(", "))
+    }
 }
 
 fn append_window(card: &GtkBox, name: &str, window: Option<&crate::model::RateWindow>) {

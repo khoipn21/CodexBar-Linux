@@ -399,13 +399,59 @@ fn build_about_page() -> PreferencesPage {
         .icon_name("help-about-symbolic")
         .build();
     let group = PreferencesGroup::builder().title("CodexBar for Linux").build();
-    let row = ActionRow::builder()
+
+    let version = ActionRow::builder()
         .title("CodexBar")
-        .subtitle("Every AI coding limit in your panel. Engine: steipete/CodexBar (Swift). GUI: GTK4/libadwaita.")
+        .subtitle(&format!("Version {}", env!("CARGO_PKG_VERSION")))
         .build();
-    group.add(&row);
+    group.add(&version);
+
+    let engine_row = ActionRow::builder()
+        .title("Engine")
+        .subtitle("steipete/CodexBar (Swift), bundled and served locally")
+        .build();
+    group.add(&engine_row);
+
+    let gui_row = ActionRow::builder()
+        .title("Interface")
+        .subtitle("GTK4 / libadwaita native tray + panel utility")
+        .build();
+    group.add(&gui_row);
+
+    let about_btn = gtk4::Button::builder()
+        .label("Open About window")
+        .valign(gtk4::Align::Center)
+        .build();
+    about_btn.connect_clicked(|btn| {
+        if let Some(root) = btn.root().and_downcast::<gtk4::Window>() {
+            show_about(&root);
+        }
+    });
+    let about_row = ActionRow::builder().title("Credits and license").build();
+    about_row.add_suffix(&about_btn);
+    group.add(&about_row);
+
     page.add(&group);
     page
+}
+
+/// Full libadwaita About window with credits/license parity to the macOS About.
+pub fn show_about(parent: &impl IsA<gtk4::Window>) {
+    let about = libadwaita::AboutWindow::builder()
+        .application_name("CodexBar")
+        .application_icon("codexbar")
+        .version(env!("CARGO_PKG_VERSION"))
+        .developer_name("CodexBar Linux port")
+        .comments("Every AI coding-provider usage limit in your panel.")
+        .website("https://github.com/steipete/CodexBar")
+        .license_type(gtk4::License::MitX11)
+        .build();
+    about.add_credit_section(
+        Some("Upstream engine"),
+        &["steipete/CodexBar (Swift) https://github.com/steipete/CodexBar"],
+    );
+    about.set_transient_for(Some(parent));
+    about.present();
 }
 
 /// Minimal info dialog used by validate/login flows.
