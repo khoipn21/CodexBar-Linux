@@ -1,0 +1,36 @@
+[
+  {
+    "credits" : {
+      "events" : [
+
+      ],
+      "remaining" : 0,
+      "updatedAt" : "2026-06-10T05:29:39Z"
+    },
+    "provider" : "codex",
+    "source" : "oauth",
+    "usage" : {
+      "accountEmail" : "user@example.com",
+      "identity" : {
+        "accountEmail" : "user@example.com",
+        "loginMethod" : "plus",
+        "providerID" : "codex"
+      },
+      "loginMethod" : "plus",
+      "primary" : {
+        "resetDescription" : "5:29 PM",
+        "resetsAt" : "2026-06-10T10:29:39Z",
+        "usedPercent" : 1,
+        "windowMinutes" : 300
+      },
+      "secondary" : {
+        "resetDescription" : "Jun 16 at 4:17 PM",
+        "resetsAt" : "2026-06-16T09:17:58Z",
+        "usedPercent" : 3,
+        "windowMinutes" : 10080
+      },
+      "tertiary" : null,
+      "updatedAt" : "2026-06-10T05:29:39Z"
+    }
+  }
+]

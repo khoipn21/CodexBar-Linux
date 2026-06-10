@@ -1,0 +1,14 @@
+# Build artifacts
+/out/
+**/.build/
+target/
+
+# Swift toolchain (installed via scripts/setup-swift-toolchain.sh)
+# lives in ~/.local/share/swiftly, not in-repo
+
+# Engine bundle libs are generated, not committed
+/out/engine/
+
+# OS / editor
+*.swp
+.DS_Store

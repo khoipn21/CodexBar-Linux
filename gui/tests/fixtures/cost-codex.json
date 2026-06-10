@@ -1,0 +1,244 @@
+[
+  {
+    "currencyCode" : "USD",
+    "daily" : [
+      {
+        "date" : "2026-05-30",
+        "inputTokens" : 5162111,
+        "modelBreakdowns" : [
+          {
+            "cost" : 5.312425,
+            "modelName" : "gpt-5.5",
+            "totalTokens" : 5178872
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.5"
+        ],
+        "outputTokens" : 16761,
+        "totalCost" : 5.312425,
+        "totalTokens" : 5178872
+      },
+      {
+        "date" : "2026-05-31",
+        "inputTokens" : 25459813,
+        "modelBreakdowns" : [
+          {
+            "cost" : 23.081575,
+            "modelName" : "gpt-5.5",
+            "totalTokens" : 23831486
+          },
+          {
+            "cost" : 1.426496,
+            "modelName" : "gpt-5.4",
+            "totalTokens" : 1744064
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.4",
+          "gpt-5.5"
+        ],
+        "outputTokens" : 115737,
+        "totalCost" : 24.508071,
+        "totalTokens" : 25575550
+      },
+      {
+        "date" : "2026-06-01",
+        "inputTokens" : 38053509,
+        "modelBreakdowns" : [
+          {
+            "cost" : 13.295964,
+            "modelName" : "gpt-5.5",
+            "totalTokens" : 13506078
+          },
+          {
+            "cost" : 9.74157835,
+            "modelName" : "gpt-5.3-codex",
+            "totalTokens" : 24742142
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.3-codex",
+          "gpt-5.5"
+        ],
+        "outputTokens" : 194711,
+        "totalCost" : 23.03754235,
+        "totalTokens" : 38248220
+      },
+      {
+        "date" : "2026-06-02",
+        "inputTokens" : 39457926,
+        "modelBreakdowns" : [
+          {
+            "cost" : 15.529415,
+            "modelName" : "gpt-5.4",
+            "totalTokens" : 39108605
+          },
+          {
+            "cost" : 0.3291925,
+            "modelName" : "gpt-5.3-codex",
+            "totalTokens" : 530338
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.3-codex",
+          "gpt-5.4"
+        ],
+        "outputTokens" : 181017,
+        "totalCost" : 15.8586075,
+        "totalTokens" : 39638943
+      },
+      {
+        "date" : "2026-06-03",
+        "inputTokens" : 34943065,
+        "modelBreakdowns" : [
+          {
+            "cost" : 10.323285,
+            "modelName" : "gpt-5.4",
+            "totalTokens" : 23876097
+          },
+          {
+            "cost" : 1.55010495,
+            "modelName" : "gpt-5.4-mini",
+            "totalTokens" : 11243657
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.4",
+          "gpt-5.4-mini"
+        ],
+        "outputTokens" : 176689,
+        "totalCost" : 11.87338995,
+        "totalTokens" : 35119754
+      },
+      {
+        "date" : "2026-06-04",
+        "inputTokens" : 29383167,
+        "modelBreakdowns" : [
+          {
+            "cost" : 11.657899,
+            "modelName" : "gpt-5.5",
+            "totalTokens" : 14479397
+          },
+          {
+            "cost" : 7.24234,
+            "modelName" : "gpt-5.4",
+            "totalTokens" : 15038270
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.4",
+          "gpt-5.5"
+        ],
+        "outputTokens" : 134500,
+        "totalCost" : 18.900239,
+        "totalTokens" : 29517667
+      },
+      {
+        "date" : "2026-06-05",
+        "inputTokens" : 19672381,
+        "modelBreakdowns" : [
+          {
+            "cost" : 18.952667,
+            "modelName" : "gpt-5.5",
+            "totalTokens" : 19783832
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.5"
+        ],
+        "outputTokens" : 111451,
+        "totalCost" : 18.952667,
+        "totalTokens" : 19783832
+      },
+      {
+        "date" : "2026-06-06",
+        "inputTokens" : 471523,
+        "modelBreakdowns" : [
+          {
+            "cost" : 0.672347,
+            "modelName" : "gpt-5.5",
+            "totalTokens" : 476653
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.5"
+        ],
+        "outputTokens" : 5130,
+        "totalCost" : 0.672347,
+        "totalTokens" : 476653
+      },
+      {
+        "date" : "2026-06-07",
+        "inputTokens" : 1318280,
+        "modelBreakdowns" : [
+          {
+            "cost" : 2.58613,
+            "modelName" : "gpt-5.5",
+            "totalTokens" : 1340195
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.5"
+        ],
+        "outputTokens" : 21915,
+        "totalCost" : 2.58613,
+        "totalTokens" : 1340195
+      },
+      {
+        "date" : "2026-06-08",
+        "inputTokens" : 55102055,
+        "modelBreakdowns" : [
+          {
+            "cost" : 21.6162665,
+            "modelName" : "gpt-5.4",
+            "totalTokens" : 55225166
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.4"
+        ],
+        "outputTokens" : 123111,
+        "totalCost" : 21.6162665,
+        "totalTokens" : 55225166
+      },
+      {
+        "date" : "2026-06-09",
+        "inputTokens" : 38935943,
+        "modelBreakdowns" : [
+          {
+            "cost" : 17.7738105,
+            "modelName" : "gpt-5.4",
+            "totalTokens" : 35525046
+          },
+          {
+            "cost" : 0.7259766,
+            "modelName" : "gpt-5.4-mini",
+            "totalTokens" : 3627118
+          }
+        ],
+        "modelsUsed" : [
+          "gpt-5.4",
+          "gpt-5.4-mini"
+        ],
+        "outputTokens" : 216221,
+        "totalCost" : 18.4997871,
+        "totalTokens" : 39152164
+      }
+    ],
+    "historyDays" : 30,
+    "last30DaysCostUSD" : 161.8174724,
+    "last30DaysTokens" : 289257016,
+    "provider" : "codex",
+    "sessionCostUSD" : 18.4997871,
+    "sessionTokens" : 39152164,
+    "source" : "local",
+    "totals" : {
+      "inputTokens" : 287959773,
+      "outputTokens" : 1297243,
+      "totalCost" : 161.8174724,
+      "totalTokens" : 289257016
+    },
+    "updatedAt" : "2026-06-10T05:29:39Z"
+  }
+]

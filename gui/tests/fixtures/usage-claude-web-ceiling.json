@@ -1,0 +1,1 @@
+[{"provider":"claude","source":"auto","error":{"kind":"runtime","code":1,"message":"Error: selected source requires web support and is only supported on macOS."}}]
