@@ -78,17 +78,30 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
     header.append(&copy);
     card.append(&header);
 
-    // Identity line: login method / plan and organization, when present.
-    if let Some(id) = p.usage.as_ref().and_then(|u| u.identity.as_ref()) {
+    // Identity line: source, login method / plan, organization, and engine
+    // version, when present.
+    {
         let mut parts: Vec<String> = Vec::new();
-        if let Some(method) = id.login_method.as_deref() {
-            if !method.is_empty() {
-                parts.push(method.to_string());
+        if let Some(src) = p.source.as_deref() {
+            if !src.is_empty() {
+                parts.push(src.to_string());
             }
         }
-        if let Some(org) = id.account_organization.as_deref() {
-            if !org.is_empty() {
-                parts.push(org.to_string());
+        if let Some(id) = p.usage.as_ref().and_then(|u| u.identity.as_ref()) {
+            if let Some(method) = id.login_method.as_deref() {
+                if !method.is_empty() {
+                    parts.push(method.to_string());
+                }
+            }
+            if let Some(org) = id.account_organization.as_deref() {
+                if !org.is_empty() {
+                    parts.push(org.to_string());
+                }
+            }
+        }
+        if let Some(version) = p.version.as_deref() {
+            if !version.is_empty() {
+                parts.push(format!("v{}", version.trim_start_matches('v')));
             }
         }
         if !parts.is_empty() {
