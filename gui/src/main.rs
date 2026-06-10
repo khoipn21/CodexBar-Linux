@@ -6,14 +6,18 @@
 //! `codexbar serve`), a refresh timer, and a libadwaita window that shows
 //! provider cards. See docs/system-architecture.md.
 
+mod config_store;
 mod engine_client;
 mod format;
 mod icon_renderer;
+mod login;
 mod model;
 mod popover;
 mod providers;
+mod settings;
 mod tray;
 
+use config_store::ConfigStore;
 use engine_client::EngineClient;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -50,9 +54,10 @@ fn main() -> glib::ExitCode {
 
     let app = libadwaita::Application::builder().application_id(APP_ID).build();
     let (tx, rx) = async_channel::unbounded::<TrayCommand>();
+    let config = Arc::new(Mutex::new(ConfigStore::new(engine_bin.clone())));
 
     app.connect_activate(move |app| {
-        build_ui(app, engine.clone(), tx.clone(), rx.clone());
+        build_ui(app, engine.clone(), config.clone(), tx.clone(), rx.clone());
     });
 
     let empty: [&str; 0] = [];
@@ -62,6 +67,7 @@ fn main() -> glib::ExitCode {
 fn build_ui(
     app: &libadwaita::Application,
     engine: Arc<Mutex<EngineClient>>,
+    config: Arc<Mutex<ConfigStore>>,
     tx: async_channel::Sender<TrayCommand>,
     rx: async_channel::Receiver<TrayCommand>,
 ) {
@@ -136,6 +142,7 @@ fn build_ui(
         let window = window.clone();
         let app = app.clone();
         let refresh = refresh.clone();
+        let config = config.clone();
         glib::spawn_future_local(async move {
             while let Ok(cmd) = rx.recv().await {
                 match cmd {
@@ -147,7 +154,7 @@ fn build_ui(
                         }
                     }
                     TrayCommand::RefreshNow => refresh(),
-                    TrayCommand::OpenSettings => window.present(), // Phase 3 wires real settings
+                    TrayCommand::OpenSettings => settings::open(&window, config.clone()),
                     TrayCommand::Quit => app.quit(),
                 }
             }

@@ -1,0 +1,297 @@
+//! libadwaita settings window. Mirrors the macOS Preferences panes that are
+//! meaningful on Linux: Providers (per-provider config + login), General
+//! (refresh cadence, launch at login), Display, Advanced, About.
+//!
+//! Provider mutations persist to ~/.codexbar/config.json via ConfigStore, so
+//! the CLI and GUI stay in sync.
+
+use crate::config_store::{ConfigStore, ProviderEntry};
+use crate::login;
+use crate::providers::branding;
+use gtk4::prelude::*;
+use libadwaita::prelude::*;
+use libadwaita::{
+    ActionRow, ComboRow, EntryRow, PasswordEntryRow, PreferencesGroup, PreferencesPage,
+    PreferencesWindow, SwitchRow,
+};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+const SOURCE_MODES: [&str; 5] = ["auto", "web", "cli", "oauth", "api"];
+const COOKIE_SOURCES: [&str; 3] = ["auto", "manual", "off"];
+
+/// Open (or re-open) the settings window.
+pub fn open(parent: &impl IsA<gtk4::Window>, store: Arc<Mutex<ConfigStore>>) {
+    let window = PreferencesWindow::builder()
+        .title("CodexBar Settings")
+        .modal(false)
+        .search_enabled(true)
+        .default_width(640)
+        .default_height(720)
+        .build();
+    window.set_transient_for(Some(parent));
+
+    window.add(&build_providers_page(store.clone()));
+    window.add(&build_general_page());
+    window.add(&build_advanced_page(store.clone()));
+    window.add(&build_about_page());
+
+    window.present();
+}
+
+fn build_providers_page(store: Arc<Mutex<ConfigStore>>) -> PreferencesPage {
+    let page = PreferencesPage::builder()
+        .title("Providers")
+        .icon_name("network-server-symbolic")
+        .build();
+
+    let providers = store.lock().unwrap().load_providers().unwrap_or_default();
+    let group = PreferencesGroup::builder()
+        .title("Providers")
+        .description("Enable and configure each AI coding provider. Changes are written to ~/.codexbar/config.json.")
+        .build();
+
+    for entry in providers {
+        group.add(&build_provider_row(entry, store.clone()));
+    }
+    page.add(&group);
+    page
+}
+
+/// One expander row per provider: enable switch + a detail area with source,
+/// cookie, API key, host/region/workspace, and a login/diagnose button.
+fn build_provider_row(entry: ProviderEntry, store: Arc<Mutex<ConfigStore>>) -> libadwaita::ExpanderRow {
+    let id = entry.id().to_string();
+    let b = branding(&id);
+    let entry = Rc::new(std::cell::RefCell::new(entry));
+
+    let row = libadwaita::ExpanderRow::builder()
+        .title(&b.display_name)
+        .subtitle(&id)
+        .build();
+
+    // Enable toggle in the row prefix.
+    let enable = gtk4::Switch::builder()
+        .active(entry.borrow().enabled())
+        .valign(gtk4::Align::Center)
+        .build();
+    {
+        let store = store.clone();
+        let id = id.clone();
+        enable.connect_state_set(move |_, state| {
+            if let Ok(s) = store.lock() {
+                let _ = s.set_enabled(&id, state);
+            }
+            glib::Propagation::Proceed
+        });
+    }
+    row.add_prefix(&enable);
+
+    // Source mode combo.
+    let source = ComboRow::builder().title("Source").build();
+    let source_model = gtk4::StringList::new(&SOURCE_MODES);
+    source.set_model(Some(&source_model));
+    let cur_source = entry.borrow().str_field("source").unwrap_or_else(|| "auto".into());
+    if let Some(idx) = SOURCE_MODES.iter().position(|m| *m == cur_source) {
+        source.set_selected(idx as u32);
+    }
+    {
+        let store = store.clone();
+        let entry = entry.clone();
+        source.connect_selected_notify(move |c| {
+            let v = SOURCE_MODES.get(c.selected() as usize).copied().unwrap_or("auto");
+            entry.borrow_mut().set_str("source", Some(v));
+            persist(&store, &entry.borrow());
+        });
+    }
+    row.add_row(&source);
+
+    // Cookie source combo.
+    let cookie = ComboRow::builder().title("Cookie source").build();
+    let cookie_model = gtk4::StringList::new(&COOKIE_SOURCES);
+    cookie.set_model(Some(&cookie_model));
+    let cur_cookie = entry.borrow().str_field("cookieSource").unwrap_or_else(|| "auto".into());
+    if let Some(idx) = COOKIE_SOURCES.iter().position(|m| *m == cur_cookie) {
+        cookie.set_selected(idx as u32);
+    }
+    {
+        let store = store.clone();
+        let entry = entry.clone();
+        cookie.connect_selected_notify(move |c| {
+            let v = COOKIE_SOURCES.get(c.selected() as usize).copied().unwrap_or("auto");
+            entry.borrow_mut().set_str("cookieSource", Some(v));
+            persist(&store, &entry.borrow());
+        });
+    }
+    row.add_row(&cookie);
+
+    // Manual cookie header (secret).
+    let cookie_header = PasswordEntryRow::builder().title("Cookie header").build();
+    if let Some(h) = entry.borrow().str_field("cookieHeader") {
+        cookie_header.set_text(&h);
+    }
+    {
+        let store = store.clone();
+        let entry = entry.clone();
+        cookie_header.connect_apply(move |e| {
+            entry.borrow_mut().set_str("cookieHeader", Some(&e.text()));
+            persist(&store, &entry.borrow());
+        });
+    }
+    row.add_row(&cookie_header);
+
+    // Optional host / region / workspace fields.
+    for (field, title) in [
+        ("enterpriseHost", "Host / base URL"),
+        ("region", "Region"),
+        ("workspaceID", "Workspace / project ID"),
+    ] {
+        let e = EntryRow::builder().title(title).build();
+        if let Some(v) = entry.borrow().str_field(field) {
+            e.set_text(&v);
+        }
+        let store = store.clone();
+        let entry = entry.clone();
+        let field = field.to_string();
+        e.connect_apply(move |e| {
+            entry.borrow_mut().set_str(&field, Some(&e.text()));
+            persist(&store, &entry.borrow());
+        });
+        row.add_row(&e);
+    }
+
+    // API key entry (secret) + login/diagnose actions.
+    let api_row = ActionRow::builder().title("Authentication").build();
+    let key_btn = gtk4::Button::builder()
+        .label("Set API key…")
+        .valign(gtk4::Align::Center)
+        .build();
+    {
+        let store = store.clone();
+        let id = id.clone();
+        key_btn.connect_clicked(move |btn| {
+            login::api_key::prompt(btn, &id, store.clone());
+        });
+    }
+    let diag_btn = gtk4::Button::builder()
+        .label("Diagnose")
+        .valign(gtk4::Align::Center)
+        .build();
+    {
+        let store = store.clone();
+        let id = id.clone();
+        diag_btn.connect_clicked(move |btn| {
+            login::cli_check::run(btn, &id, store.clone());
+        });
+    }
+    api_row.add_suffix(&key_btn);
+    api_row.add_suffix(&diag_btn);
+    row.add_row(&api_row);
+
+    row
+}
+
+fn persist(store: &Arc<Mutex<ConfigStore>>, entry: &ProviderEntry) {
+    if let Ok(s) = store.lock() {
+        if let Err(e) = s.save_provider_fields(entry) {
+            log::warn!("failed to save provider {}: {e}", entry.id());
+        }
+    }
+}
+
+fn build_general_page() -> PreferencesPage {
+    let page = PreferencesPage::builder()
+        .title("General")
+        .icon_name("preferences-system-symbolic")
+        .build();
+    let group = PreferencesGroup::builder().title("Refresh").build();
+
+    let cadence = ComboRow::builder().title("Refresh frequency").build();
+    let model = gtk4::StringList::new(&["Manual", "1 min", "2 min", "5 min", "15 min", "30 min"]);
+    cadence.set_model(Some(&model));
+    cadence.set_selected(3); // default 5 min
+    group.add(&cadence);
+
+    let launch = SwitchRow::builder()
+        .title("Launch at login")
+        .subtitle("Start CodexBar automatically (configured in Phase 5)")
+        .build();
+    group.add(&launch);
+
+    let notify = SwitchRow::builder()
+        .title("Session quota notifications")
+        .build();
+    group.add(&notify);
+
+    page.add(&group);
+    page
+}
+
+fn build_advanced_page(store: Arc<Mutex<ConfigStore>>) -> PreferencesPage {
+    let page = PreferencesPage::builder()
+        .title("Advanced")
+        .icon_name("applications-engineering-symbolic")
+        .build();
+    let group = PreferencesGroup::builder().title("Advanced").build();
+
+    let status = SwitchRow::builder()
+        .title("Check provider status")
+        .subtitle("Poll provider status pages and show incident badges")
+        .build();
+    group.add(&status);
+
+    let validate_row = ActionRow::builder()
+        .title("Validate config")
+        .subtitle("Run codexbar config validate")
+        .build();
+    let validate_btn = gtk4::Button::builder()
+        .label("Validate")
+        .valign(gtk4::Align::Center)
+        .build();
+    {
+        let store = store.clone();
+        validate_btn.connect_clicked(move |btn| {
+            let result = store.lock().unwrap().validate();
+            let (heading, body) = match result {
+                Ok(s) if s.trim() == "[]" => ("Config is valid".to_string(), String::new()),
+                Ok(s) => ("Validation warnings".to_string(), s),
+                Err(e) => ("Validation error".to_string(), e.to_string()),
+            };
+            show_info(btn, &heading, &body);
+        });
+    }
+    validate_row.add_suffix(&validate_btn);
+    group.add(&validate_row);
+
+    page.add(&group);
+    page
+}
+
+fn build_about_page() -> PreferencesPage {
+    let page = PreferencesPage::builder()
+        .title("About")
+        .icon_name("help-about-symbolic")
+        .build();
+    let group = PreferencesGroup::builder().title("CodexBar for Linux").build();
+    let row = ActionRow::builder()
+        .title("CodexBar")
+        .subtitle("Every AI coding limit in your panel. Engine: steipete/CodexBar (Swift). GUI: GTK4/libadwaita.")
+        .build();
+    group.add(&row);
+    page.add(&group);
+    page
+}
+
+/// Minimal info dialog used by validate/login flows.
+pub fn show_info(anchor: &impl IsA<gtk4::Widget>, heading: &str, body: &str) {
+    let dialog = libadwaita::MessageDialog::builder()
+        .heading(heading)
+        .body(body)
+        .build();
+    if let Some(root) = anchor.root().and_downcast::<gtk4::Window>() {
+        dialog.set_transient_for(Some(&root));
+    }
+    dialog.add_response("ok", "OK");
+    dialog.present();
+}
