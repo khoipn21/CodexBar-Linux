@@ -257,8 +257,14 @@ fn build_general_page() -> PreferencesPage {
 
     let launch = SwitchRow::builder()
         .title("Launch at login")
-        .subtitle("Start CodexBar automatically (configured in Phase 5)")
+        .subtitle("Start CodexBar automatically after you sign in")
+        .active(crate::autostart::is_enabled())
         .build();
+    launch.connect_active_notify(|row| {
+        if let Err(e) = crate::autostart::set_enabled(row.is_active()) {
+            log::warn!("failed to update autostart: {e}");
+        }
+    });
     group.add(&launch);
 
     let notify = SwitchRow::builder()

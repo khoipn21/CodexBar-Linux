@@ -32,6 +32,8 @@ impl EngineClient {
             if let Some(dir) = exe.parent() {
                 candidates.push(dir.join("engine/codexbar"));
                 candidates.push(dir.join("../engine/codexbar"));
+                // Installed layout: /usr/bin/codexbar-tray -> /usr/lib/codexbar/engine/codexbar
+                candidates.push(dir.join("../lib/codexbar/engine/codexbar"));
             }
         }
         if let Ok(cwd) = std::env::current_dir() {

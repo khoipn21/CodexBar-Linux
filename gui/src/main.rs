@@ -6,6 +6,7 @@
 //! `codexbar serve`), a refresh timer, and a libadwaita window that shows
 //! provider cards. See docs/system-architecture.md.
 
+mod autostart;
 mod config_store;
 mod engine_client;
 mod format;
@@ -20,7 +21,7 @@ mod web;
 
 use config_store::ConfigStore;
 use engine_client::EngineClient;
-use gtk4::glib;
+use gtk4::{gio, glib, Align, Box as GtkBox, Label, Orientation};
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 use icon_renderer::{render, IconOptions, IconPixmap};
@@ -53,7 +54,10 @@ fn main() -> glib::ExitCode {
         }
     };
 
-    let app = libadwaita::Application::builder().application_id(APP_ID).build();
+    let app = libadwaita::Application::builder()
+        .application_id(APP_ID)
+        .flags(gio::ApplicationFlags::NON_UNIQUE)
+        .build();
     let (tx, rx) = async_channel::unbounded::<TrayCommand>();
     let config = Arc::new(Mutex::new(ConfigStore::new(engine_bin.clone())));
 
@@ -93,6 +97,9 @@ fn build_ui(
     toolbar.set_content(Some(&scroller));
     window.set_content(Some(&toolbar));
 
+    scroller.set_child(Some(&status_page("Loading usage…", "Starting CodexBar engine and fetching enabled providers.")));
+    window.present();
+
     let payloads: Rc<RefCell<Vec<ProviderPayload>>> = Rc::new(RefCell::new(Vec::new()));
 
     // Tray service on its own thread.
@@ -110,7 +117,7 @@ fn build_ui(
         let scroller = scroller.clone();
         let tray_handle = tray_handle.clone();
         Rc::new(move || {
-            let result = engine.lock().unwrap().usage(Some("all"));
+            let result = engine.lock().unwrap().usage(None);
             match result {
                 Ok(list) => {
                     *payloads.borrow_mut() = list.clone();
@@ -119,6 +126,10 @@ fn build_ui(
                 }
                 Err(e) => {
                     log::warn!("refresh failed: {e}");
+                    scroller.set_child(Some(&status_page(
+                        "Refresh failed",
+                        &format!("{e}\n\nOpen Settings from this window or run `codexbar config dump` to inspect provider config."),
+                    )));
                     let icon = render(None, &IconOptions { dimmed: true, ..Default::default() });
                     tray_handle.update(move |t: &mut CodexBarTray| {
                         t.set_icon(clone_icon(&icon));
@@ -161,6 +172,31 @@ fn build_ui(
             }
         });
     }
+}
+
+fn status_page(title: &str, body: &str) -> GtkBox {
+    let root = GtkBox::new(Orientation::Vertical, 8);
+    root.set_margin_top(48);
+    root.set_margin_bottom(24);
+    root.set_margin_start(24);
+    root.set_margin_end(24);
+    root.set_valign(Align::Center);
+    root.set_vexpand(true);
+
+    let heading = Label::new(Some(title));
+    heading.add_css_class("title-3");
+    heading.set_halign(Align::Center);
+    heading.set_wrap(true);
+    root.append(&heading);
+
+    let text = Label::new(Some(body));
+    text.add_css_class("dim-label");
+    text.set_halign(Align::Center);
+    text.set_justify(gtk4::Justification::Center);
+    text.set_wrap(true);
+    root.append(&text);
+
+    root
 }
 
 fn clone_icon(icon: &IconPixmap) -> IconPixmap {

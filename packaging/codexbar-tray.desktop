@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=CodexBar
+Comment=AI coding-provider usage in your panel
+Exec=codexbar-tray
+Icon=codexbar
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=false

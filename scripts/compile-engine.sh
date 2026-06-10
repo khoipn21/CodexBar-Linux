@@ -36,6 +36,7 @@ die()  { printf '\033[1;31m[engine] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 hash -r
 export LD_LIBRARY_PATH="$COMPAT_LIBS_DIR:${LD_LIBRARY_PATH:-}"
 export LIBRARY_PATH="$COMPAT_LIBS_DIR:${LIBRARY_PATH:-}"
+export CODEXBAR_USE_LOCAL_SWEETCOOKIEKIT="${CODEXBAR_USE_LOCAL_SWEETCOOKIEKIT:-1}"
 
 command -v swift >/dev/null || die "swift not on PATH; run scripts/setup-swift-toolchain.sh first."
 
