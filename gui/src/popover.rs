@@ -113,21 +113,60 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
         }
     }
 
-    // Status incident.
+    // Provider status badge: operational / maintenance / incident, with the
+    // last-updated time and a link to the provider status page when present.
     if let Some(s) = &p.status {
-        if s.is_incident() {
-            let label = s
-                .description
-                .clone()
-                .unwrap_or_else(|| s.indicator.clone());
-            let inc = Label::new(Some(&format!("⚠ {label}")));
-            inc.add_css_class("caption");
-            inc.set_halign(Align::Start);
-            card.append(&inc);
+        if s.indicator != "none" || s.url.is_some() {
+            append_status(&card, s);
         }
     }
 
     card
+}
+
+fn append_status(card: &GtkBox, s: &crate::model::ProviderStatus) {
+    let (glyph, text) = match s.indicator.as_str() {
+        "none" => ("●", "Operational".to_string()),
+        "maintenance" => ("◐", "Under maintenance".to_string()),
+        "minor" | "major" | "critical" => (
+            "⚠",
+            s.description.clone().unwrap_or_else(|| format!("{} incident", s.indicator)),
+        ),
+        other => ("•", s.description.clone().unwrap_or_else(|| other.to_string())),
+    };
+
+    let row = GtkBox::new(Orientation::Horizontal, 6);
+    let badge = Label::new(Some(&format!("{glyph} {text}")));
+    badge.add_css_class("caption");
+    badge.set_halign(Align::Start);
+    row.append(&badge);
+
+    if let Some(updated) = status_updated_label(s.updated_at.as_deref()) {
+        let when = Label::new(Some(&updated));
+        when.add_css_class("dim-label");
+        when.add_css_class("caption");
+        when.set_halign(Align::End);
+        when.set_hexpand(true);
+        row.append(&when);
+    }
+    card.append(&row);
+
+    if let Some(url) = &s.url {
+        let link = gtk4::LinkButton::builder()
+            .uri(url)
+            .label("Open status page")
+            .halign(Align::Start)
+            .has_frame(false)
+            .build();
+        link.add_css_class("caption");
+        card.append(&link);
+    }
+}
+
+fn status_updated_label(updated_at: Option<&str>) -> Option<String> {
+    let iso = updated_at?;
+    let dt = chrono::DateTime::parse_from_rfc3339(iso).ok()?;
+    Some(format!("updated {}", dt.format("%b %d %H:%M")))
 }
 
 fn summary_line(name: &str, p: &ProviderPayload) -> String {
