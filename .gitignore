@@ -2,6 +2,7 @@
 /out/
 **/.build/
 target/
+gui/target/
 
 # Swift toolchain (installed via scripts/setup-swift-toolchain.sh)
 # lives in ~/.local/share/swiftly, not in-repo

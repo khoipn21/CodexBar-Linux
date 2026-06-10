@@ -17,6 +17,7 @@ mod tray;
 use engine_client::EngineClient;
 use gtk4::glib;
 use gtk4::prelude::*;
+use libadwaita::prelude::*;
 use icon_renderer::{render, IconOptions, IconPixmap};
 use model::{ProviderPayload, RateWindow};
 use std::cell::RefCell;

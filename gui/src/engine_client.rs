@@ -72,7 +72,7 @@ impl EngineClient {
             .timeout(Duration::from_secs(45))
             .build()?;
 
-        let mut client = EngineClient {
+        let client = EngineClient {
             base_url: format!("http://127.0.0.1:{port}"),
             http,
             child: Some(child),
