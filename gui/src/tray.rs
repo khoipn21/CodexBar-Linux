@@ -11,6 +11,7 @@ use async_channel::Sender;
 pub enum TrayCommand {
     ToggleWindow,
     RefreshNow,
+    OpenPanelUtility,
     OpenSettings,
     Quit,
 }
@@ -79,6 +80,14 @@ impl Tray for CodexBarTray {
                 label: "Refresh now".into(),
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.tx.send_blocking(TrayCommand::RefreshNow);
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "Open panel utility".into(),
+                activate: Box::new(|t: &mut Self| {
+                    let _ = t.tx.send_blocking(TrayCommand::OpenPanelUtility);
                 }),
                 ..Default::default()
             }

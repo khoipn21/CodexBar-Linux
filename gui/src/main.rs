@@ -13,6 +13,7 @@ mod format;
 mod icon_renderer;
 mod login;
 mod model;
+mod panel;
 mod popover;
 mod providers;
 mod settings;
@@ -155,6 +156,7 @@ fn build_ui(
         let app = app.clone();
         let refresh = refresh.clone();
         let config = config.clone();
+        let payloads = payloads.clone();
         glib::spawn_future_local(async move {
             while let Ok(cmd) = rx.recv().await {
                 match cmd {
@@ -166,6 +168,19 @@ fn build_ui(
                         }
                     }
                     TrayCommand::RefreshNow => refresh(),
+                    TrayCommand::OpenPanelUtility => {
+                        let app = app.clone();
+                        let window = window.clone();
+                        let config = config.clone();
+                        let refresh = refresh.clone();
+                        let payloads = payloads.borrow().clone();
+                        panel::open(
+                            &app,
+                            &payloads,
+                            move || refresh(),
+                            move || settings::open(&window, config.clone()),
+                        );
+                    }
                     TrayCommand::OpenSettings => settings::open(&window, config.clone()),
                     TrayCommand::Quit => app.quit(),
                 }
