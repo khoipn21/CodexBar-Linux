@@ -13,6 +13,7 @@ mod format;
 mod icon_renderer;
 mod login;
 mod model;
+mod notifications;
 mod panel;
 mod popover;
 mod providers;
@@ -28,6 +29,7 @@ use libadwaita::prelude::*;
 use icon_renderer::{render, IconOptions, IconPixmap};
 use model::{ProviderPayload, RateWindow};
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tray::{CodexBarTray, TrayCommand};
@@ -102,6 +104,7 @@ fn build_ui(
     window.present();
 
     let payloads: Rc<RefCell<Vec<ProviderPayload>>> = Rc::new(RefCell::new(Vec::new()));
+    let notified: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
 
     // Tray service on its own thread.
     let tray_service = ksni::TrayService::new(CodexBarTray::new(
@@ -113,8 +116,10 @@ fn build_ui(
     tray_service.spawn();
 
     let refresh: Rc<dyn Fn()> = {
+        let app = app.clone();
         let engine = engine.clone();
         let payloads = payloads.clone();
+        let notified = notified.clone();
         let scroller = scroller.clone();
         let tray_handle = tray_handle.clone();
         Rc::new(move || {
@@ -124,6 +129,7 @@ fn build_ui(
                     *payloads.borrow_mut() = list.clone();
                     scroller.set_child(Some(&popover::build_provider_list(&list)));
                     update_tray(&tray_handle, &list);
+                    notifications::publish(&app, &list, &mut notified.borrow_mut());
                 }
                 Err(e) => {
                     log::warn!("refresh failed: {e}");
