@@ -78,6 +78,29 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
     header.append(&copy);
     card.append(&header);
 
+    // Identity line: login method / plan and organization, when present.
+    if let Some(id) = p.usage.as_ref().and_then(|u| u.identity.as_ref()) {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(method) = id.login_method.as_deref() {
+            if !method.is_empty() {
+                parts.push(method.to_string());
+            }
+        }
+        if let Some(org) = id.account_organization.as_deref() {
+            if !org.is_empty() {
+                parts.push(org.to_string());
+            }
+        }
+        if !parts.is_empty() {
+            let line = Label::new(Some(&parts.join(" · ")));
+            line.add_css_class("caption");
+            line.add_css_class("dim-label");
+            line.set_halign(Align::Start);
+            line.set_xalign(0.0);
+            card.append(&line);
+        }
+    }
+
     // Error state: show the engine message (e.g. macOS-web ceiling).
     if let Some(err) = &p.error {
         let msg = Label::new(Some(&err.message));
@@ -132,7 +155,41 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
         }
     }
 
+    // Last-updated footer from the usage snapshot.
+    if let Some(updated) = p
+        .usage
+        .as_ref()
+        .and_then(|u| u.updated_at.as_deref())
+        .and_then(updated_label)
+    {
+        let footer = Label::new(Some(&updated));
+        footer.add_css_class("caption");
+        footer.add_css_class("dim-label");
+        footer.set_halign(Align::Start);
+        footer.set_xalign(0.0);
+        card.append(&footer);
+    }
+
     card
+}
+
+/// "updated 2m ago" style relative footer from an ISO timestamp.
+fn updated_label(iso: &str) -> Option<String> {
+    let dt = chrono::DateTime::parse_from_rfc3339(iso).ok()?;
+    let secs = (chrono::Utc::now() - dt.with_timezone(&chrono::Utc)).num_seconds();
+    if secs < 0 {
+        return Some("updated just now".to_string());
+    }
+    let rel = if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86_400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86_400)
+    };
+    Some(format!("updated {rel}"))
 }
 
 fn append_status(card: &GtkBox, s: &crate::model::ProviderStatus) {
