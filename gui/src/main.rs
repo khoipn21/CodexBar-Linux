@@ -93,7 +93,58 @@ fn build_ui(
     });
 
     let toolbar = libadwaita::ToolbarView::new();
-    toolbar.add_top_bar(&libadwaita::HeaderBar::new());
+    let header = libadwaita::HeaderBar::new();
+
+    // Header actions mirror the tray menu so features are reachable from the
+    // window itself: refresh, cost/tokens, panel utility, settings.
+    let refresh_btn = gtk4::Button::builder()
+        .icon_name("view-refresh-symbolic")
+        .tooltip_text("Refresh now")
+        .build();
+    {
+        let tx = tx.clone();
+        refresh_btn.connect_clicked(move |_| {
+            let _ = tx.send_blocking(TrayCommand::RefreshNow);
+        });
+    }
+    header.pack_start(&refresh_btn);
+
+    let menu_btn = gtk4::MenuButton::builder()
+        .icon_name("open-menu-symbolic")
+        .tooltip_text("More")
+        .build();
+    let menu_popover = gtk4::Popover::new();
+    let menu_box = GtkBox::new(Orientation::Vertical, 2);
+    menu_box.set_margin_top(6);
+    menu_box.set_margin_bottom(6);
+    menu_box.set_margin_start(6);
+    menu_box.set_margin_end(6);
+    for (label, cmd) in [
+        ("Cost & tokens…", TrayCommand::OpenCost),
+        ("Panel utility", TrayCommand::OpenPanelUtility),
+        ("Settings…", TrayCommand::OpenSettings),
+    ] {
+        let item = gtk4::Button::builder()
+            .label(label)
+            .has_frame(false)
+            .build();
+        if let Some(child) = item.child().and_downcast::<gtk4::Label>() {
+            child.set_halign(Align::Start);
+            child.set_xalign(0.0);
+        }
+        let tx = tx.clone();
+        let popover = menu_popover.clone();
+        item.connect_clicked(move |_| {
+            let _ = tx.send_blocking(cmd.clone());
+            popover.popdown();
+        });
+        menu_box.append(&item);
+    }
+    menu_popover.set_child(Some(&menu_box));
+    menu_btn.set_popover(Some(&menu_popover));
+    header.pack_end(&menu_btn);
+
+    toolbar.add_top_bar(&header);
     let scroller = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vexpand(true)
