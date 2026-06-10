@@ -148,6 +148,29 @@ impl ConfigStore {
         self.write_atomic(&root)
     }
 
+    pub fn get_app_field(&self, key: &str) -> Option<Value> {
+        let text = std::fs::read_to_string(&self.path).ok()?;
+        let root: Value = serde_json::from_str(&text).ok()?;
+        root.get("linuxGui")?.get(key).cloned()
+    }
+
+    pub fn set_app_field(&self, key: &str, value: Value) -> Result<()> {
+        let text = std::fs::read_to_string(&self.path).unwrap_or_else(|_| {
+            r#"{"version":1,"providers":[]}"#.to_string()
+        });
+        let mut root: Value = serde_json::from_str(&text).context("parsing config")?;
+        if root.get("linuxGui").and_then(Value::as_object).is_none() {
+            root.as_object_mut()
+                .context("config root is not an object")?
+                .insert("linuxGui".into(), Value::Object(Map::new()));
+        }
+        root.get_mut("linuxGui")
+            .and_then(Value::as_object_mut)
+            .context("linuxGui is not an object")?
+            .insert(key.into(), value);
+        self.write_atomic(&root)
+    }
+
     pub fn validate(&self) -> Result<String> {
         self.run_config(&["validate", "--format", "json"])
     }
