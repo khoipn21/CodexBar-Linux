@@ -103,13 +103,24 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
         }
     }
 
-    // Credits.
+    // Credits + recent credit events.
     if let Some(c) = &p.credits {
         if c.remaining != 0.0 {
             let credits = Label::new(Some(&format!("Credits: {:.2} left", c.remaining)));
             credits.add_css_class("caption");
             credits.set_halign(Align::Start);
             card.append(&credits);
+        }
+        for event in c.events.iter().take(3) {
+            if let Some(line) = credit_event_line(event) {
+                let ev = Label::new(Some(&line));
+                ev.add_css_class("caption");
+                ev.add_css_class("dim-label");
+                ev.set_halign(Align::Start);
+                ev.set_wrap(true);
+                ev.set_xalign(0.0);
+                card.append(&ev);
+            }
         }
     }
 
@@ -167,6 +178,19 @@ fn status_updated_label(updated_at: Option<&str>) -> Option<String> {
     let iso = updated_at?;
     let dt = chrono::DateTime::parse_from_rfc3339(iso).ok()?;
     Some(format!("updated {}", dt.format("%b %d %H:%M")))
+}
+
+fn credit_event_line(e: &crate::model::CreditEvent) -> Option<String> {
+    // Render only events that carry meaningful detail.
+    let used = e.credits_used?;
+    let date = e.date.as_deref().unwrap_or("");
+    let service = e.service.as_deref().unwrap_or("usage");
+    let date_short = date.split('T').next().unwrap_or(date);
+    if date_short.is_empty() {
+        Some(format!("• {service}: {used:.2}"))
+    } else {
+        Some(format!("• {date_short} {service}: {used:.2}"))
+    }
 }
 
 fn summary_line(name: &str, p: &ProviderPayload) -> String {
