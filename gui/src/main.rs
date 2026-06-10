@@ -257,8 +257,37 @@ fn update_tray(handle: &TrayHandle, list: &[ProviderPayload]) {
     };
 
     let icon = render(window.as_ref(), &opts);
+    let provider_lines = provider_menu_lines(list);
     handle.update(move |t: &mut CodexBarTray| {
         t.set_icon(clone_icon(&icon));
         t.set_tooltip(tooltip.clone());
+        t.set_provider_lines(provider_lines.clone());
     });
+}
+
+fn provider_menu_lines(list: &[ProviderPayload]) -> Vec<String> {
+    list.iter()
+        .map(|p| {
+            let name = providers::branding(&p.provider).display_name;
+            if let Some(err) = &p.error {
+                return format!("{name}: {}", err.message);
+            }
+            if let Some(window) = p.headline_window() {
+                let incident = p
+                    .status
+                    .as_ref()
+                    .filter(|s| s.is_incident())
+                    .map(|s| format!(" · {}", s.indicator))
+                    .unwrap_or_default();
+                return format!(
+                    "{name}: {}% remaining{incident}",
+                    window.remaining_percent().round() as i64
+                );
+            }
+            if let Some(credits) = &p.credits {
+                return format!("{name}: {:.2} credits", credits.remaining);
+            }
+            format!("{name}: no usage data")
+        })
+        .collect()
 }
