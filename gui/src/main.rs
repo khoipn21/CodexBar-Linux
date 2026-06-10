@@ -209,13 +209,10 @@ fn build_ui(
     };
 
     refresh();
-    {
-        let refresh = refresh.clone();
-        glib::timeout_add_seconds_local(REFRESH_SECS as u32, move || {
-            refresh();
-            glib::ControlFlow::Continue
-        });
-    }
+    // Self-rescheduling timer so a changed "Refresh frequency" setting takes
+    // effect without a restart. "Manual" disables auto-refresh; the timer keeps
+    // polling the preference every 30s so re-enabling it resumes cleanly.
+    schedule_refresh(refresh.clone(), config.clone());
 
     // Drain tray commands on the GTK main loop.
     {
@@ -265,6 +262,37 @@ fn build_ui(
             }
         });
     }
+}
+
+/// Map the persisted "Refresh frequency" label to seconds. `None` = manual
+/// (no auto-refresh). Defaults to 5 minutes, matching the macOS default.
+fn refresh_secs_from_config(config: &Arc<Mutex<ConfigStore>>) -> Option<u64> {
+    let label = config
+        .lock()
+        .ok()
+        .and_then(|c| c.get_app_field("refreshFrequency"))
+        .and_then(|v| v.as_str().map(str::to_string));
+    match label.as_deref() {
+        Some("Manual") => None,
+        Some("1 min") => Some(60),
+        Some("2 min") => Some(120),
+        Some("15 min") => Some(900),
+        Some("30 min") => Some(1800),
+        _ => Some(REFRESH_SECS), // "5 min" / unset
+    }
+}
+
+/// One-shot timer that re-arms itself each fire, re-reading the cadence from
+/// config so changes in Settings take effect without a restart. When set to
+/// Manual, it idles (polling the preference every 30s) instead of refreshing.
+fn schedule_refresh(refresh: Rc<dyn Fn()>, config: Arc<Mutex<ConfigStore>>) {
+    let delay = refresh_secs_from_config(&config).unwrap_or(30);
+    glib::timeout_add_seconds_local_once(delay as u32, move || {
+        if refresh_secs_from_config(&config).is_some() {
+            refresh();
+        }
+        schedule_refresh(refresh.clone(), config.clone());
+    });
 }
 
 fn status_page(title: &str, body: &str) -> GtkBox {
