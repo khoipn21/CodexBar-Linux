@@ -93,7 +93,7 @@ fn build_provider_cost(c: &CostPayload) -> GtkBox {
     ));
     card.append(&kpis);
 
-    // Daily history, newest first.
+    // Daily history, newest first, preceded by a spend chart.
     if !c.daily.is_empty() {
         let header = Label::new(Some("Daily history"));
         header.add_css_class("caption-heading");
@@ -101,12 +101,54 @@ fn build_provider_cost(c: &CostPayload) -> GtkBox {
         header.set_margin_top(6);
         card.append(&header);
 
+        card.append(&spend_chart(&c.daily));
+
         for entry in c.daily.iter().rev() {
             card.append(&daily_row(entry, &currency));
         }
     }
 
     card
+}
+
+/// A small cairo bar chart of daily spend (chronological, oldest left). Mirrors
+/// the macOS cost history chart at panel scale.
+fn spend_chart(daily: &[CostDailyEntry]) -> gtk4::DrawingArea {
+    let costs: Vec<f64> = daily.iter().map(|d| d.cost_usd.unwrap_or(0.0)).collect();
+    let max = costs.iter().cloned().fold(0.0_f64, f64::max);
+
+    let area = gtk4::DrawingArea::new();
+    area.set_content_height(96);
+    area.set_hexpand(true);
+    area.set_margin_top(4);
+    area.set_margin_bottom(4);
+
+    area.set_draw_func(move |_, cr, width, height| {
+        let w = width as f64;
+        let h = height as f64;
+        if costs.is_empty() || max <= 0.0 {
+            return;
+        }
+        let n = costs.len();
+        let gap = 3.0;
+        let bar_w = ((w - gap * (n as f64 - 1.0)) / n as f64).max(1.0);
+
+        for (i, c) in costs.iter().enumerate() {
+            let frac = (c / max).clamp(0.0, 1.0);
+            let bar_h = (h - 2.0) * frac;
+            let x = i as f64 * (bar_w + gap);
+            let y = h - bar_h;
+            // Accent blue, brighter for the most recent (last) bar.
+            if i + 1 == n {
+                cr.set_source_rgba(0.26, 0.52, 0.96, 1.0);
+            } else {
+                cr.set_source_rgba(0.26, 0.52, 0.96, 0.55);
+            }
+            cr.rectangle(x, y, bar_w, bar_h);
+            let _ = cr.fill();
+        }
+    });
+    area
 }
 
 fn kpi_block(label: &str, value: &str, tokens: Option<String>) -> GtkBox {
