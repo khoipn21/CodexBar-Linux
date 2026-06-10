@@ -72,7 +72,13 @@ fn build_provider_cost(c: &CostPayload) -> GtkBox {
     title.set_halign(Align::Start);
     card.append(&title);
 
-    let subtitle = Label::new(Some("API-rate estimate from local token ledger"));
+    let subtitle_text = match c.source.as_deref() {
+        Some(src) if !src.is_empty() => {
+            format!("API-rate estimate · source: {src}")
+        }
+        _ => "API-rate estimate from local token ledger".to_string(),
+    };
+    let subtitle = Label::new(Some(&subtitle_text));
     subtitle.add_css_class("dim-label");
     subtitle.add_css_class("caption");
     subtitle.set_halign(Align::Start);
@@ -95,7 +101,7 @@ fn build_provider_cost(c: &CostPayload) -> GtkBox {
 
     // Token totals breakdown (input / output / cache), when reported.
     if let Some(t) = &c.totals {
-        if let Some(section) = totals_section(t) {
+        if let Some(section) = totals_section(t, &currency) {
             card.append(&section);
         }
     }
@@ -115,12 +121,41 @@ fn build_provider_cost(c: &CostPayload) -> GtkBox {
         }
     }
 
+    // Last-updated footer.
+    if let Some(updated) = c.updated_at.as_deref().and_then(updated_label) {
+        let footer = Label::new(Some(&updated));
+        footer.add_css_class("caption");
+        footer.add_css_class("dim-label");
+        footer.set_halign(Align::Start);
+        footer.set_margin_top(4);
+        card.append(&footer);
+    }
+
     card
 }
 
-/// Token totals breakdown row: input / output / cache read / cache creation.
-/// Returns `None` when no token components are present.
-fn totals_section(t: &crate::model::CostTotals) -> Option<GtkBox> {
+/// "updated 2m ago" relative footer from an ISO timestamp.
+fn updated_label(iso: &str) -> Option<String> {
+    let dt = chrono::DateTime::parse_from_rfc3339(iso).ok()?;
+    let secs = (chrono::Utc::now() - dt.with_timezone(&chrono::Utc)).num_seconds();
+    if secs < 0 {
+        return Some("updated just now".to_string());
+    }
+    let rel = if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86_400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86_400)
+    };
+    Some(format!("updated {rel}"))
+}
+
+/// Token totals breakdown row: input / output / cache read / cache creation,
+/// plus the aggregate cost. Returns `None` when nothing is present.
+fn totals_section(t: &crate::model::CostTotals, currency: &str) -> Option<GtkBox> {
     let rows: Vec<(&str, Option<i64>)> = vec![
         ("Input", t.total_input_tokens),
         ("Output", t.total_output_tokens),
@@ -128,7 +163,7 @@ fn totals_section(t: &crate::model::CostTotals) -> Option<GtkBox> {
         ("Cache write", t.cache_creation_tokens),
         ("Total", t.total_tokens),
     ];
-    if rows.iter().all(|(_, v)| v.is_none()) {
+    if rows.iter().all(|(_, v)| v.is_none()) && t.total_cost_usd.is_none() {
         return None;
     }
 
@@ -154,6 +189,22 @@ fn totals_section(t: &crate::model::CostTotals) -> Option<GtkBox> {
         row.append(&r);
         section.append(&row);
     }
+
+    if let Some(cost) = t.total_cost_usd {
+        let row = GtkBox::new(Orientation::Horizontal, 6);
+        let l = Label::new(Some("Total cost"));
+        l.add_css_class("caption");
+        l.add_css_class("dim-label");
+        l.set_halign(Align::Start);
+        row.append(&l);
+        let r = Label::new(Some(&money(Some(cost), currency)));
+        r.add_css_class("caption");
+        r.set_halign(Align::End);
+        r.set_hexpand(true);
+        row.append(&r);
+        section.append(&row);
+    }
+
     Some(section)
 }
 
