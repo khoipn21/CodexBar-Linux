@@ -93,6 +93,13 @@ fn build_provider_cost(c: &CostPayload) -> GtkBox {
     ));
     card.append(&kpis);
 
+    // Token totals breakdown (input / output / cache), when reported.
+    if let Some(t) = &c.totals {
+        if let Some(section) = totals_section(t) {
+            card.append(&section);
+        }
+    }
+
     // Daily history, newest first, preceded by a spend chart.
     if !c.daily.is_empty() {
         let header = Label::new(Some("Daily history"));
@@ -109,6 +116,45 @@ fn build_provider_cost(c: &CostPayload) -> GtkBox {
     }
 
     card
+}
+
+/// Token totals breakdown row: input / output / cache read / cache creation.
+/// Returns `None` when no token components are present.
+fn totals_section(t: &crate::model::CostTotals) -> Option<GtkBox> {
+    let rows: Vec<(&str, Option<i64>)> = vec![
+        ("Input", t.total_input_tokens),
+        ("Output", t.total_output_tokens),
+        ("Cache read", t.cache_read_tokens),
+        ("Cache write", t.cache_creation_tokens),
+        ("Total", t.total_tokens),
+    ];
+    if rows.iter().all(|(_, v)| v.is_none()) {
+        return None;
+    }
+
+    let section = GtkBox::new(Orientation::Vertical, 2);
+    section.set_margin_top(6);
+    let header = Label::new(Some("Token breakdown"));
+    header.add_css_class("caption-heading");
+    header.set_halign(Align::Start);
+    section.append(&header);
+
+    for (label, value) in rows {
+        let Some(v) = value else { continue };
+        let row = GtkBox::new(Orientation::Horizontal, 6);
+        let l = Label::new(Some(label));
+        l.add_css_class("caption");
+        l.add_css_class("dim-label");
+        l.set_halign(Align::Start);
+        row.append(&l);
+        let r = Label::new(Some(&format!("{} tokens", tokens_short(v))));
+        r.add_css_class("caption");
+        r.set_halign(Align::End);
+        r.set_hexpand(true);
+        row.append(&r);
+        section.append(&row);
+    }
+    Some(section)
 }
 
 /// A small cairo bar chart of daily spend (chronological, oldest left). Mirrors
@@ -193,14 +239,58 @@ fn daily_row(entry: &CostDailyEntry, currency: &str) -> GtkBox {
     top.append(&cost);
     row.append(&top);
 
-    // Model breakdown line, if present.
+    // Per-day token detail (input / output / cache), when present.
+    let mut token_parts: Vec<String> = Vec::new();
+    if let Some(v) = entry.input_tokens {
+        token_parts.push(format!("in {}", tokens_short(v)));
+    }
+    if let Some(v) = entry.output_tokens {
+        token_parts.push(format!("out {}", tokens_short(v)));
+    }
+    if let Some(v) = entry.cache_read_tokens {
+        token_parts.push(format!("cache-r {}", tokens_short(v)));
+    }
+    if let Some(v) = entry.cache_creation_tokens {
+        token_parts.push(format!("cache-w {}", tokens_short(v)));
+    }
+    if token_parts.is_empty() {
+        if let Some(v) = entry.total_tokens {
+            token_parts.push(format!("{} tokens", tokens_short(v)));
+        }
+    }
+    if !token_parts.is_empty() {
+        let toks = Label::new(Some(&token_parts.join(" · ")));
+        toks.add_css_class("caption");
+        toks.add_css_class("dim-label");
+        toks.set_halign(Align::Start);
+        toks.set_xalign(0.0);
+        row.append(&toks);
+    }
+
+    // Model breakdown line, if present; else fall back to the model name list.
     if let Some(models) = &entry.model_breakdowns {
         if !models.is_empty() {
             let parts: Vec<String> = models
                 .iter()
-                .map(|m| format!("{} {}", m.model_name, money(m.cost_usd, currency)))
+                .map(|m| {
+                    let tok = m
+                        .total_tokens
+                        .map(|t| format!(" ({})", tokens_short(t)))
+                        .unwrap_or_default();
+                    format!("{} {}{tok}", m.model_name, money(m.cost_usd, currency))
+                })
                 .collect();
             let detail = Label::new(Some(&parts.join(" · ")));
+            detail.add_css_class("caption");
+            detail.add_css_class("dim-label");
+            detail.set_halign(Align::Start);
+            detail.set_wrap(true);
+            detail.set_xalign(0.0);
+            row.append(&detail);
+        }
+    } else if let Some(models) = &entry.models_used {
+        if !models.is_empty() {
+            let detail = Label::new(Some(&models.join(", ")));
             detail.add_css_class("caption");
             detail.add_css_class("dim-label");
             detail.set_halign(Align::Start);
