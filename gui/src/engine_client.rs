@@ -2,7 +2,7 @@
 //! Rust values. Spawns `codexbar serve` as a child on an ephemeral loopback
 //! port, then fetches usage/cost over HTTP.
 
-use crate::model::ProviderPayload;
+use crate::model::{CostPayload, ProviderPayload};
 use anyhow::{anyhow, Context, Result};
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -110,6 +110,19 @@ impl EngineClient {
         let text = resp.text()?;
         serde_json::from_str(&text)
             .with_context(|| format!("parsing /usage response: {text}"))
+    }
+
+    /// Fetch local token-cost data (`/cost`). Only Claude and Codex report data;
+    /// the engine returns an empty array or per-provider error for the rest.
+    pub fn cost(&self, scope: Option<&str>) -> Result<Vec<CostPayload>> {
+        let url = match scope {
+            Some(s) => format!("{}/cost?provider={}", self.base_url, s),
+            None => format!("{}/cost", self.base_url),
+        };
+        let resp = self.http.get(&url).send().context("GET /cost")?;
+        let text = resp.text()?;
+        serde_json::from_str(&text)
+            .with_context(|| format!("parsing /cost response: {text}"))
     }
 }
 

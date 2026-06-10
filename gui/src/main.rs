@@ -8,6 +8,7 @@
 
 mod autostart;
 mod config_store;
+mod cost_window;
 mod engine_client;
 mod format;
 mod icon_renderer;
@@ -171,6 +172,7 @@ fn build_ui(
         let app = app.clone();
         let refresh = refresh.clone();
         let config = config.clone();
+        let engine = engine.clone();
         let payloads = payloads.clone();
         glib::spawn_future_local(async move {
             while let Ok(cmd) = rx.recv().await {
@@ -195,6 +197,16 @@ fn build_ui(
                             move || refresh(),
                             move || settings::open(&window, config.clone()),
                         );
+                    }
+                    TrayCommand::OpenCost => {
+                        let costs = engine.lock().unwrap().cost(Some("all"));
+                        match costs {
+                            Ok(list) => cost_window::open(&app, &list),
+                            Err(e) => {
+                                log::warn!("cost fetch failed: {e}");
+                                cost_window::open(&app, &[]);
+                            }
+                        }
                     }
                     TrayCommand::OpenSettings => settings::open(&window, config.clone()),
                     TrayCommand::Quit => app.quit(),

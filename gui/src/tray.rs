@@ -12,6 +12,7 @@ pub enum TrayCommand {
     ToggleWindow,
     RefreshNow,
     OpenPanelUtility,
+    OpenCost,
     OpenSettings,
     Quit,
 }
@@ -109,6 +110,13 @@ impl Tray for CodexBarTray {
             label: "Open panel utility".into(),
             activate: Box::new(|t: &mut Self| {
                 let _ = t.tx.send_blocking(TrayCommand::OpenPanelUtility);
+            }),
+            ..Default::default()
+        }.into());
+        items.push(StandardItem {
+            label: "Cost & tokens…".into(),
+            activate: Box::new(|t: &mut Self| {
+                let _ = t.tx.send_blocking(TrayCommand::OpenCost);
             }),
             ..Default::default()
         }.into());
