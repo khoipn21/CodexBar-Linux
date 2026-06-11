@@ -78,7 +78,6 @@ jobs:
           EOF
 
       - name: Create GitHub release
-        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -86,6 +85,17 @@ jobs:
           gh release create "${{ steps.version.outputs.tag }}" \
             --title "${{ steps.version.outputs.tag }}" \
             --notes-file release-notes.txt
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: release-notes.txt
+          files: |
+            out/dist/*.deb
+            out/dist/*.tar.gz
+          fail_on_unmatched_files: true
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
