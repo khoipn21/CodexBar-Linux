@@ -8,11 +8,14 @@
 
 mod autostart;
 mod config_store;
+mod cost_window;
 mod engine_client;
 mod format;
 mod icon_renderer;
 mod login;
 mod model;
+mod notifications;
+mod panel;
 mod popover;
 mod providers;
 mod settings;
@@ -27,6 +30,7 @@ use libadwaita::prelude::*;
 use icon_renderer::{render, IconOptions, IconPixmap};
 use model::{ProviderPayload, RateWindow};
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tray::{CodexBarTray, TrayCommand};
@@ -82,14 +86,80 @@ fn build_ui(
         .default_width(360)
         .default_height(520)
         .build();
-    // Closing the window hides it (tray app keeps running).
-    window.connect_close_request(|w| {
-        w.set_visible(false);
-        glib::Propagation::Stop
-    });
+    // Closing the window hides it (tray app keeps running). Notify once so the
+    // user knows it is still running in the panel tray and how to reopen it —
+    // important on GNOME, where the tray icon needs the AppIndicator extension.
+    {
+        let app = app.clone();
+        let notified_close = Rc::new(RefCell::new(false));
+        window.connect_close_request(move |w| {
+            w.set_visible(false);
+            if !*notified_close.borrow() {
+                *notified_close.borrow_mut() = true;
+                let n = gio::Notification::new("CodexBar is still running");
+                n.set_body(Some(
+                    "CodexBar minimized to the panel tray. Reopen it from the tray icon. \
+On GNOME, enable the AppIndicator extension if the icon is not visible.",
+                ));
+                app.send_notification(Some("codexbar-close-to-tray"), &n);
+            }
+            glib::Propagation::Stop
+        });
+    }
 
     let toolbar = libadwaita::ToolbarView::new();
-    toolbar.add_top_bar(&libadwaita::HeaderBar::new());
+    let header = libadwaita::HeaderBar::new();
+
+    // Header actions mirror the tray menu so features are reachable from the
+    // window itself: refresh, cost/tokens, panel utility, settings.
+    let refresh_btn = gtk4::Button::builder()
+        .icon_name("view-refresh-symbolic")
+        .tooltip_text("Refresh now")
+        .build();
+    {
+        let tx = tx.clone();
+        refresh_btn.connect_clicked(move |_| {
+            let _ = tx.send_blocking(TrayCommand::RefreshNow);
+        });
+    }
+    header.pack_start(&refresh_btn);
+
+    let menu_btn = gtk4::MenuButton::builder()
+        .icon_name("open-menu-symbolic")
+        .tooltip_text("More")
+        .build();
+    let menu_popover = gtk4::Popover::new();
+    let menu_box = GtkBox::new(Orientation::Vertical, 2);
+    menu_box.set_margin_top(6);
+    menu_box.set_margin_bottom(6);
+    menu_box.set_margin_start(6);
+    menu_box.set_margin_end(6);
+    for (label, cmd) in [
+        ("Cost & tokens…", TrayCommand::OpenCost),
+        ("Panel utility", TrayCommand::OpenPanelUtility),
+        ("Settings…", TrayCommand::OpenSettings),
+    ] {
+        let item = gtk4::Button::builder()
+            .label(label)
+            .has_frame(false)
+            .build();
+        if let Some(child) = item.child().and_downcast::<gtk4::Label>() {
+            child.set_halign(Align::Start);
+            child.set_xalign(0.0);
+        }
+        let tx = tx.clone();
+        let popover = menu_popover.clone();
+        item.connect_clicked(move |_| {
+            let _ = tx.send_blocking(cmd.clone());
+            popover.popdown();
+        });
+        menu_box.append(&item);
+    }
+    menu_popover.set_child(Some(&menu_box));
+    menu_btn.set_popover(Some(&menu_popover));
+    header.pack_end(&menu_btn);
+
+    toolbar.add_top_bar(&header);
     let scroller = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vexpand(true)
@@ -101,6 +171,7 @@ fn build_ui(
     window.present();
 
     let payloads: Rc<RefCell<Vec<ProviderPayload>>> = Rc::new(RefCell::new(Vec::new()));
+    let notified: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
 
     // Tray service on its own thread.
     let tray_service = ksni::TrayService::new(CodexBarTray::new(
@@ -112,8 +183,11 @@ fn build_ui(
     tray_service.spawn();
 
     let refresh: Rc<dyn Fn()> = {
+        let app = app.clone();
         let engine = engine.clone();
+        let config = config.clone();
         let payloads = payloads.clone();
+        let notified = notified.clone();
         let scroller = scroller.clone();
         let tray_handle = tray_handle.clone();
         Rc::new(move || {
@@ -122,7 +196,16 @@ fn build_ui(
                 Ok(list) => {
                     *payloads.borrow_mut() = list.clone();
                     scroller.set_child(Some(&popover::build_provider_list(&list)));
-                    update_tray(&tray_handle, &list);
+                    let metric = TrayMetric::from_label(
+                        config
+                            .lock()
+                            .ok()
+                            .and_then(|c| c.get_app_field("trayMetric"))
+                            .and_then(|v| v.as_str().map(str::to_string))
+                            .as_deref(),
+                    );
+                    update_tray(&tray_handle, &list, metric);
+                    notifications::publish(&app, &list, &mut notified.borrow_mut());
                 }
                 Err(e) => {
                     log::warn!("refresh failed: {e}");
@@ -141,13 +224,10 @@ fn build_ui(
     };
 
     refresh();
-    {
-        let refresh = refresh.clone();
-        glib::timeout_add_seconds_local(REFRESH_SECS as u32, move || {
-            refresh();
-            glib::ControlFlow::Continue
-        });
-    }
+    // Self-rescheduling timer so a changed "Refresh frequency" setting takes
+    // effect without a restart. "Manual" disables auto-refresh; the timer keeps
+    // polling the preference every 30s so re-enabling it resumes cleanly.
+    schedule_refresh(refresh.clone(), config.clone());
 
     // Drain tray commands on the GTK main loop.
     {
@@ -155,6 +235,8 @@ fn build_ui(
         let app = app.clone();
         let refresh = refresh.clone();
         let config = config.clone();
+        let engine = engine.clone();
+        let payloads = payloads.clone();
         glib::spawn_future_local(async move {
             while let Ok(cmd) = rx.recv().await {
                 match cmd {
@@ -166,12 +248,66 @@ fn build_ui(
                         }
                     }
                     TrayCommand::RefreshNow => refresh(),
+                    TrayCommand::OpenPanelUtility => {
+                        let app = app.clone();
+                        let window = window.clone();
+                        let config = config.clone();
+                        let refresh = refresh.clone();
+                        let payloads = payloads.borrow().clone();
+                        panel::open(
+                            &app,
+                            &payloads,
+                            move || refresh(),
+                            move || settings::open(&window, config.clone()),
+                        );
+                    }
+                    TrayCommand::OpenCost => {
+                        let costs = engine.lock().unwrap().cost(Some("all"));
+                        match costs {
+                            Ok(list) => cost_window::open(&app, &list),
+                            Err(e) => {
+                                log::warn!("cost fetch failed: {e}");
+                                cost_window::open(&app, &[]);
+                            }
+                        }
+                    }
                     TrayCommand::OpenSettings => settings::open(&window, config.clone()),
                     TrayCommand::Quit => app.quit(),
                 }
             }
         });
     }
+}
+
+/// Map the persisted "Refresh frequency" label to seconds. `None` = manual
+/// (no auto-refresh). Defaults to 5 minutes, matching the macOS default.
+fn refresh_secs_from_config(config: &Arc<Mutex<ConfigStore>>) -> Option<u64> {
+    let label = config
+        .lock()
+        .ok()
+        .and_then(|c| c.get_app_field("refreshFrequency"))
+        .and_then(|v| v.as_str().map(str::to_string));
+    match label.as_deref() {
+        Some("Manual") => None,
+        Some("1 min") => Some(60),
+        Some("2 min") => Some(120),
+        Some("15 min") => Some(900),
+        Some("30 min") => Some(1800),
+        _ => Some(REFRESH_SECS), // "5 min" / unset
+    }
+}
+
+/// One-shot timer that re-arms itself each fire, re-reading the cadence from
+/// config so changes in Settings take effect without a restart. When set to
+/// Manual, it idles (polling the preference every 30s) instead of refreshing.
+fn schedule_refresh(refresh: Rc<dyn Fn()>, config: Arc<Mutex<ConfigStore>>) {
+    let delay = refresh_secs_from_config(&config).unwrap_or(30);
+    glib::timeout_add_seconds_local_once(delay as u32, move || {
+        if refresh_secs_from_config(&config).is_some() {
+            refresh();
+        }
+        schedule_refresh(refresh.clone(), config.clone());
+    });
 }
 
 fn status_page(title: &str, body: &str) -> GtkBox {
@@ -213,20 +349,70 @@ fn clone_window(w: &RateWindow) -> RateWindow {
     }
 }
 
-/// Pick the most-urgent provider (lowest remaining%) and update the tray icon.
-fn update_tray(handle: &TrayHandle, list: &[ProviderPayload]) {
+/// Tray metric selection, mirroring the macOS menu-bar display modes. Stored as
+/// a string under `linuxGui.trayMetric` in the shared config.
+#[derive(Debug, Clone, Copy)]
+enum TrayMetric {
+    LowestRemaining,
+    HighestUsage,
+    CodexSession,
+    CodexWeekly,
+    Credits,
+}
+
+impl TrayMetric {
+    fn from_label(label: Option<&str>) -> Self {
+        match label {
+            Some("Highest usage") => TrayMetric::HighestUsage,
+            Some("Codex session") => TrayMetric::CodexSession,
+            Some("Codex weekly") => TrayMetric::CodexWeekly,
+            Some("Credits") => TrayMetric::Credits,
+            _ => TrayMetric::LowestRemaining,
+        }
+    }
+}
+
+fn pick_metric_window(metric: TrayMetric, p: &ProviderPayload) -> Option<&RateWindow> {
+    match metric {
+        TrayMetric::CodexSession if p.provider == "codex" => {
+            p.usage.as_ref().and_then(|u| u.primary.as_ref())
+        }
+        TrayMetric::CodexWeekly if p.provider == "codex" => {
+            p.usage.as_ref().and_then(|u| u.secondary.as_ref())
+        }
+        TrayMetric::CodexSession | TrayMetric::CodexWeekly => None,
+        _ => p.headline_window(),
+    }
+}
+
+/// Resolve the (remaining%, color, window, incident) headline for the chosen metric.
+fn headline_for(
+    metric: TrayMetric,
+    list: &[ProviderPayload],
+) -> Option<(f64, providers::Rgb, RateWindow, bool)> {
     let mut headline: Option<(f64, providers::Rgb, RateWindow, bool)> = None;
     for p in list {
         let incident = p.status.as_ref().map(|s| s.is_incident()).unwrap_or(false);
-        if let Some(w) = p.headline_window() {
-            let remaining = w.remaining_percent();
-            let color = providers::branding(&p.provider).color;
-            let better = headline.as_ref().map(|(r, ..)| remaining < *r).unwrap_or(true);
-            if better {
-                headline = Some((remaining, color, clone_window(w), incident));
+        let Some(w) = pick_metric_window(metric, p) else { continue };
+        let remaining = w.remaining_percent();
+        let color = providers::branding(&p.provider).color;
+        let better = match metric {
+            // Highest usage = lowest remaining, same comparison but kept explicit.
+            TrayMetric::HighestUsage | TrayMetric::LowestRemaining => {
+                headline.as_ref().map(|(r, ..)| remaining < *r).unwrap_or(true)
             }
+            _ => headline.is_none(),
+        };
+        if better {
+            headline = Some((remaining, color, clone_window(w), incident));
         }
     }
+    headline
+}
+
+/// Update the tray icon and menu for the selected metric.
+fn update_tray(handle: &TrayHandle, list: &[ProviderPayload], metric: TrayMetric) {
+    let headline = headline_for(metric, list);
 
     let (tooltip, opts, window) = match headline {
         Some((remaining, color, window, incident)) => (
@@ -242,8 +428,37 @@ fn update_tray(handle: &TrayHandle, list: &[ProviderPayload]) {
     };
 
     let icon = render(window.as_ref(), &opts);
+    let provider_lines = provider_menu_lines(list);
     handle.update(move |t: &mut CodexBarTray| {
         t.set_icon(clone_icon(&icon));
         t.set_tooltip(tooltip.clone());
+        t.set_provider_lines(provider_lines.clone());
     });
+}
+
+fn provider_menu_lines(list: &[ProviderPayload]) -> Vec<String> {
+    list.iter()
+        .map(|p| {
+            let name = providers::branding(&p.provider).display_name;
+            if let Some(err) = &p.error {
+                return format!("{name}: {}", err.message);
+            }
+            if let Some(window) = p.headline_window() {
+                let incident = p
+                    .status
+                    .as_ref()
+                    .filter(|s| s.is_incident())
+                    .map(|s| format!(" · {}", s.indicator))
+                    .unwrap_or_default();
+                return format!(
+                    "{name}: {}% remaining{incident}",
+                    window.remaining_percent().round() as i64
+                );
+            }
+            if let Some(credits) = &p.credits {
+                return format!("{name}: {:.2} credits", credits.remaining);
+            }
+            format!("{name}: no usage data")
+        })
+        .collect()
 }

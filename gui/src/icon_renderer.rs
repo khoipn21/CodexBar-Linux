@@ -54,12 +54,14 @@ pub fn render(window: Option<&RateWindow>, opts: &IconOptions) -> IconPixmap {
         let y = inset;
         let radius = 4.0;
 
-        // Track (background outline).
+        // Track (background outline). Drawn with a strong, theme-neutral stroke
+        // so the icon is clearly visible on both light and dark GNOME panels
+        // even before any usage data has loaded (empty meter at startup).
         rounded_rect(&cr, x, y, w, h, radius);
-        cr.set_source_rgba(0.5, 0.5, 0.5, 0.35 * alpha);
-        cr.set_line_width(1.5);
+        cr.set_source_rgba(0.62, 0.62, 0.64, 0.95 * alpha);
+        cr.set_line_width(2.0);
         let _ = cr.stroke_preserve();
-        cr.set_source_rgba(0.5, 0.5, 0.5, 0.12 * alpha);
+        cr.set_source_rgba(0.5, 0.5, 0.5, 0.20 * alpha);
         let _ = cr.fill();
 
         // Fill fraction.

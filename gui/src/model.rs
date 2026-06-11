@@ -151,6 +151,90 @@ pub struct CreditEvent {
     pub credits_used: Option<f64>,
 }
 
+/// One provider's cost/token spend from `/cost` or `codexbar cost --format json`.
+/// Local-only (token-ledger derived); only Claude and Codex report data.
+/// Source of truth: engine CLICostCommand.swift `CostPayload`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CostPayload {
+    pub provider: String,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(rename = "currencyCode", default)]
+    pub currency_code: Option<String>,
+    #[serde(rename = "sessionTokens", default)]
+    pub session_tokens: Option<i64>,
+    #[serde(rename = "sessionCostUSD", default)]
+    pub session_cost_usd: Option<f64>,
+    #[serde(rename = "historyDays", default)]
+    pub history_days: Option<i64>,
+    #[serde(rename = "last30DaysTokens", default)]
+    pub last_30_days_tokens: Option<i64>,
+    #[serde(rename = "last30DaysCostUSD", default)]
+    pub last_30_days_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub daily: Vec<CostDailyEntry>,
+    #[serde(default)]
+    pub totals: Option<CostTotals>,
+    #[serde(rename = "updatedAt", default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub error: Option<ProviderError>,
+}
+
+impl CostPayload {
+    /// Currency code with a sensible default for formatting.
+    pub fn currency(&self) -> &str {
+        self.currency_code.as_deref().unwrap_or("USD")
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CostDailyEntry {
+    pub date: String,
+    #[serde(rename = "inputTokens", default)]
+    pub input_tokens: Option<i64>,
+    #[serde(rename = "outputTokens", default)]
+    pub output_tokens: Option<i64>,
+    #[serde(rename = "cacheReadTokens", default)]
+    pub cache_read_tokens: Option<i64>,
+    #[serde(rename = "cacheCreationTokens", default)]
+    pub cache_creation_tokens: Option<i64>,
+    #[serde(rename = "totalTokens", default)]
+    pub total_tokens: Option<i64>,
+    #[serde(rename = "totalCost", default)]
+    pub cost_usd: Option<f64>,
+    #[serde(rename = "modelsUsed", default)]
+    pub models_used: Option<Vec<String>>,
+    #[serde(rename = "modelBreakdowns", default)]
+    pub model_breakdowns: Option<Vec<CostModelBreakdown>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CostModelBreakdown {
+    #[serde(rename = "modelName")]
+    pub model_name: String,
+    #[serde(rename = "cost", default)]
+    pub cost_usd: Option<f64>,
+    #[serde(rename = "totalTokens", default)]
+    pub total_tokens: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CostTotals {
+    #[serde(rename = "inputTokens", default)]
+    pub total_input_tokens: Option<i64>,
+    #[serde(rename = "outputTokens", default)]
+    pub total_output_tokens: Option<i64>,
+    #[serde(rename = "cacheReadTokens", default)]
+    pub cache_read_tokens: Option<i64>,
+    #[serde(rename = "cacheCreationTokens", default)]
+    pub cache_creation_tokens: Option<i64>,
+    #[serde(rename = "totalTokens", default)]
+    pub total_tokens: Option<i64>,
+    #[serde(rename = "totalCost", default)]
+    pub total_cost_usd: Option<f64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +285,32 @@ mod tests {
         // Should parse without panicking even though it carries an error payload.
         let _: Vec<ProviderPayload> =
             serde_json::from_str(&fixture("usage-default.json")).unwrap();
+    }
+
+    #[test]
+    fn deserializes_codex_cost() {
+        let payloads: Vec<CostPayload> =
+            serde_json::from_str(&fixture("cost-codex.json")).unwrap();
+        assert_eq!(payloads.len(), 1);
+        let c = &payloads[0];
+        assert_eq!(c.provider, "codex");
+        assert_eq!(c.currency(), "USD");
+        assert_eq!(c.session_tokens, Some(39152164));
+        assert_eq!(c.last_30_days_cost_usd, Some(161.8174724));
+        assert_eq!(c.daily.len(), 11);
+        let first = &c.daily[0];
+        assert_eq!(first.date, "2026-05-30");
+        assert_eq!(first.cost_usd, Some(5.312425));
+        let breakdown = first.model_breakdowns.as_ref().unwrap();
+        assert_eq!(breakdown[0].model_name, "gpt-5.5");
+        let totals = c.totals.as_ref().unwrap();
+        assert_eq!(totals.total_tokens, Some(289257016));
+    }
+
+    #[test]
+    fn deserializes_default_cost() {
+        // Default/empty cost should parse without panicking.
+        let _: Vec<CostPayload> =
+            serde_json::from_str(&fixture("cost-default.json")).unwrap();
     }
 }

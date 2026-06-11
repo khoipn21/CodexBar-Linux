@@ -2,7 +2,7 @@
 //! delivered to the GTK main loop through a channel of `TrayCommand`.
 
 use crate::icon_renderer::IconPixmap;
-use ksni::{Icon, MenuItem, ToolTip, Tray};
+use ksni::{Category, Icon, MenuItem, Status, ToolTip, Tray};
 use ksni::menu::StandardItem;
 use async_channel::Sender;
 
@@ -11,6 +11,8 @@ use async_channel::Sender;
 pub enum TrayCommand {
     ToggleWindow,
     RefreshNow,
+    OpenPanelUtility,
+    OpenCost,
     OpenSettings,
     Quit,
 }
@@ -18,12 +20,13 @@ pub enum TrayCommand {
 pub struct CodexBarTray {
     icon: IconPixmap,
     tooltip: String,
+    provider_lines: Vec<String>,
     tx: Sender<TrayCommand>,
 }
 
 impl CodexBarTray {
     pub fn new(icon: IconPixmap, tooltip: String, tx: Sender<TrayCommand>) -> Self {
-        CodexBarTray { icon, tooltip, tx }
+        CodexBarTray { icon, tooltip, provider_lines: Vec::new(), tx }
     }
 
     pub fn set_icon(&mut self, icon: IconPixmap) {
@@ -32,6 +35,10 @@ impl CodexBarTray {
 
     pub fn set_tooltip(&mut self, tooltip: String) {
         self.tooltip = tooltip;
+    }
+
+    pub fn set_provider_lines(&mut self, provider_lines: Vec<String>) {
+        self.provider_lines = provider_lines;
     }
 }
 
@@ -42,6 +49,23 @@ impl Tray for CodexBarTray {
 
     fn title(&self) -> String {
         "CodexBar".into()
+    }
+
+    // Keep the item in the "active" status so GNOME's AppIndicator extension
+    // always shows it (PASSIVE items can be hidden by some hosts).
+    fn status(&self) -> Status {
+        Status::Active
+    }
+
+    fn category(&self) -> Category {
+        Category::ApplicationStatus
+    }
+
+    // Themed fallback name. Hosts that cannot render our custom ARGB pixmap
+    // (or that prefer named icons, like GNOME AppIndicator) fall back to this
+    // freedesktop icon instead of showing nothing.
+    fn icon_name(&self) -> String {
+        "utilities-system-monitor-symbolic".into()
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
@@ -66,40 +90,68 @@ impl Tray for CodexBarTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        vec![
-            StandardItem {
-                label: "Show usage".into(),
-                activate: Box::new(|t: &mut Self| {
-                    let _ = t.tx.send_blocking(TrayCommand::ToggleWindow);
-                }),
+        let mut items: Vec<MenuItem<Self>> = Vec::new();
+
+        if self.provider_lines.is_empty() {
+            items.push(StandardItem {
+                label: "No provider usage loaded".into(),
+                enabled: false,
                 ..Default::default()
+            }.into());
+        } else {
+            for line in self.provider_lines.iter().take(12) {
+                items.push(StandardItem {
+                    label: line.clone(),
+                    enabled: false,
+                    ..Default::default()
+                }.into());
             }
-            .into(),
-            StandardItem {
-                label: "Refresh now".into(),
-                activate: Box::new(|t: &mut Self| {
-                    let _ = t.tx.send_blocking(TrayCommand::RefreshNow);
-                }),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem {
-                label: "Settings…".into(),
-                activate: Box::new(|t: &mut Self| {
-                    let _ = t.tx.send_blocking(TrayCommand::OpenSettings);
-                }),
-                ..Default::default()
-            }
-            .into(),
-            MenuItem::Separator,
-            StandardItem {
-                label: "Quit".into(),
-                activate: Box::new(|t: &mut Self| {
-                    let _ = t.tx.send_blocking(TrayCommand::Quit);
-                }),
-                ..Default::default()
-            }
-            .into(),
-        ]
+        }
+
+        items.push(MenuItem::Separator);
+        items.push(StandardItem {
+            label: "Show usage".into(),
+            activate: Box::new(|t: &mut Self| {
+                let _ = t.tx.send_blocking(TrayCommand::ToggleWindow);
+            }),
+            ..Default::default()
+        }.into());
+        items.push(StandardItem {
+            label: "Refresh now".into(),
+            activate: Box::new(|t: &mut Self| {
+                let _ = t.tx.send_blocking(TrayCommand::RefreshNow);
+            }),
+            ..Default::default()
+        }.into());
+        items.push(StandardItem {
+            label: "Open panel utility".into(),
+            activate: Box::new(|t: &mut Self| {
+                let _ = t.tx.send_blocking(TrayCommand::OpenPanelUtility);
+            }),
+            ..Default::default()
+        }.into());
+        items.push(StandardItem {
+            label: "Cost & tokens…".into(),
+            activate: Box::new(|t: &mut Self| {
+                let _ = t.tx.send_blocking(TrayCommand::OpenCost);
+            }),
+            ..Default::default()
+        }.into());
+        items.push(StandardItem {
+            label: "Settings…".into(),
+            activate: Box::new(|t: &mut Self| {
+                let _ = t.tx.send_blocking(TrayCommand::OpenSettings);
+            }),
+            ..Default::default()
+        }.into());
+        items.push(MenuItem::Separator);
+        items.push(StandardItem {
+            label: "Quit".into(),
+            activate: Box::new(|t: &mut Self| {
+                let _ = t.tx.send_blocking(TrayCommand::Quit);
+            }),
+            ..Default::default()
+        }.into());
+        items
     }
 }

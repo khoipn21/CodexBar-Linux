@@ -33,7 +33,8 @@ pub fn open(parent: &impl IsA<gtk4::Window>, store: Arc<Mutex<ConfigStore>>) {
     window.set_transient_for(Some(parent));
 
     window.add(&build_providers_page(store.clone()));
-    window.add(&build_general_page());
+    window.add(&build_general_page(store.clone()));
+    window.add(&build_display_page(store.clone()));
     window.add(&build_advanced_page(store.clone()));
     window.add(&build_about_page());
 
@@ -242,7 +243,7 @@ fn persist(store: &Arc<Mutex<ConfigStore>>, entry: &ProviderEntry) {
     }
 }
 
-fn build_general_page() -> PreferencesPage {
+fn build_general_page(store: Arc<Mutex<ConfigStore>>) -> PreferencesPage {
     let page = PreferencesPage::builder()
         .title("General")
         .icon_name("preferences-system-symbolic")
@@ -252,7 +253,27 @@ fn build_general_page() -> PreferencesPage {
     let cadence = ComboRow::builder().title("Refresh frequency").build();
     let model = gtk4::StringList::new(&["Manual", "1 min", "2 min", "5 min", "15 min", "30 min"]);
     cadence.set_model(Some(&model));
-    cadence.set_selected(3); // default 5 min
+    let current = store
+        .lock()
+        .unwrap()
+        .get_app_field("refreshFrequency")
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "5 min".into());
+    cadence.set_selected(["Manual", "1 min", "2 min", "5 min", "15 min", "30 min"]
+        .iter()
+        .position(|v| *v == current)
+        .unwrap_or(3) as u32);
+    {
+        let store = store.clone();
+        cadence.connect_selected_notify(move |row| {
+            let values = ["Manual", "1 min", "2 min", "5 min", "15 min", "30 min"];
+            if let Some(value) = values.get(row.selected() as usize) {
+                if let Err(e) = store.lock().unwrap().set_app_field("refreshFrequency", serde_json::Value::String((*value).into())) {
+                    log::warn!("failed to save refresh frequency: {e}");
+                }
+            }
+        });
+    }
     group.add(&cadence);
 
     let launch = SwitchRow::builder()
@@ -269,8 +290,64 @@ fn build_general_page() -> PreferencesPage {
 
     let notify = SwitchRow::builder()
         .title("Session quota notifications")
+        .active(store.lock().unwrap().get_app_field("quotaNotifications").and_then(|v| v.as_bool()).unwrap_or(true))
         .build();
+    {
+        let store = store.clone();
+        notify.connect_active_notify(move |row| {
+            if let Err(e) = store.lock().unwrap().set_app_field("quotaNotifications", serde_json::Value::Bool(row.is_active())) {
+                log::warn!("failed to save notification setting: {e}");
+            }
+        });
+    }
     group.add(&notify);
+
+    page.add(&group);
+    page
+}
+
+fn build_display_page(store: Arc<Mutex<ConfigStore>>) -> PreferencesPage {
+    let page = PreferencesPage::builder()
+        .title("Display")
+        .icon_name("preferences-desktop-display-symbolic")
+        .build();
+    let group = PreferencesGroup::builder()
+        .title("Panel display")
+        .description("Linux equivalents of CodexBar menu-bar display controls")
+        .build();
+
+    let mode = ComboRow::builder().title("Tray metric").build();
+    let modes = ["Lowest remaining", "Highest usage", "Codex session", "Codex weekly", "Credits"];
+    mode.set_model(Some(&gtk4::StringList::new(&modes)));
+    let current = store.lock().unwrap().get_app_field("trayMetric").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| modes[0].into());
+    mode.set_selected(modes.iter().position(|v| *v == current).unwrap_or(0) as u32);
+    {
+        let store = store.clone();
+        mode.connect_selected_notify(move |row| {
+            let modes = ["Lowest remaining", "Highest usage", "Codex session", "Codex weekly", "Credits"];
+            if let Some(value) = modes.get(row.selected() as usize) {
+                if let Err(e) = store.lock().unwrap().set_app_field("trayMetric", serde_json::Value::String((*value).into())) {
+                    log::warn!("failed to save tray metric: {e}");
+                }
+            }
+        });
+    }
+    group.add(&mode);
+
+    let show_text = SwitchRow::builder()
+        .title("Show text in panel utility")
+        .subtitle("Keep provider names and exact percentages visible instead of icon-only status")
+        .active(store.lock().unwrap().get_app_field("showPanelText").and_then(|v| v.as_bool()).unwrap_or(true))
+        .build();
+    {
+        let store = store.clone();
+        show_text.connect_active_notify(move |row| {
+            if let Err(e) = store.lock().unwrap().set_app_field("showPanelText", serde_json::Value::Bool(row.is_active())) {
+                log::warn!("failed to save display text setting: {e}");
+            }
+        });
+    }
+    group.add(&show_text);
 
     page.add(&group);
     page
@@ -322,13 +399,59 @@ fn build_about_page() -> PreferencesPage {
         .icon_name("help-about-symbolic")
         .build();
     let group = PreferencesGroup::builder().title("CodexBar for Linux").build();
-    let row = ActionRow::builder()
+
+    let version = ActionRow::builder()
         .title("CodexBar")
-        .subtitle("Every AI coding limit in your panel. Engine: steipete/CodexBar (Swift). GUI: GTK4/libadwaita.")
+        .subtitle(&format!("Version {}", env!("CARGO_PKG_VERSION")))
         .build();
-    group.add(&row);
+    group.add(&version);
+
+    let engine_row = ActionRow::builder()
+        .title("Engine")
+        .subtitle("steipete/CodexBar (Swift), bundled and served locally")
+        .build();
+    group.add(&engine_row);
+
+    let gui_row = ActionRow::builder()
+        .title("Interface")
+        .subtitle("GTK4 / libadwaita native tray + panel utility")
+        .build();
+    group.add(&gui_row);
+
+    let about_btn = gtk4::Button::builder()
+        .label("Open About window")
+        .valign(gtk4::Align::Center)
+        .build();
+    about_btn.connect_clicked(|btn| {
+        if let Some(root) = btn.root().and_downcast::<gtk4::Window>() {
+            show_about(&root);
+        }
+    });
+    let about_row = ActionRow::builder().title("Credits and license").build();
+    about_row.add_suffix(&about_btn);
+    group.add(&about_row);
+
     page.add(&group);
     page
+}
+
+/// Full libadwaita About window with credits/license parity to the macOS About.
+pub fn show_about(parent: &impl IsA<gtk4::Window>) {
+    let about = libadwaita::AboutWindow::builder()
+        .application_name("CodexBar")
+        .application_icon("codexbar")
+        .version(env!("CARGO_PKG_VERSION"))
+        .developer_name("CodexBar Linux port")
+        .comments("Every AI coding-provider usage limit in your panel.")
+        .website("https://github.com/steipete/CodexBar")
+        .license_type(gtk4::License::MitX11)
+        .build();
+    about.add_credit_section(
+        Some("Upstream engine"),
+        &["steipete/CodexBar (Swift) https://github.com/steipete/CodexBar"],
+    );
+    about.set_transient_for(Some(parent));
+    about.present();
 }
 
 /// Minimal info dialog used by validate/login flows.

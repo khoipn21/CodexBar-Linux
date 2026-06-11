@@ -2,7 +2,7 @@
 //! from the latest engine snapshot. Built imperatively so it can be rebuilt on
 //! each refresh.
 
-use crate::format::{remaining_label, reset_label};
+use crate::format::{pace_label, remaining_label, reset_label};
 use crate::model::ProviderPayload;
 use crate::providers::branding;
 use gtk4::prelude::*;
@@ -37,7 +37,7 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
     let b = branding(&p.provider);
     let card = GtkBox::new(Orientation::Vertical, 4);
 
-    // Header: provider name + optional account.
+    // Header: provider name + optional account + copy affordance.
     let header = GtkBox::new(Orientation::Horizontal, 6);
     let dot = color_dot(&b.color);
     header.append(&dot);
@@ -57,8 +57,62 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
         a.set_halign(Align::End);
         a.set_hexpand(true);
         header.append(&a);
+    } else {
+        // Keep the copy button pinned to the trailing edge.
+        let spacer = GtkBox::new(Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        header.append(&spacer);
     }
+
+    // Click-to-copy: copies a one-line summary of this provider to the clipboard.
+    let copy = gtk4::Button::builder()
+        .icon_name("edit-copy-symbolic")
+        .tooltip_text("Copy usage summary")
+        .valign(Align::Center)
+        .has_frame(false)
+        .build();
+    let summary = summary_line(&b.display_name, p);
+    copy.connect_clicked(move |btn| {
+        btn.clipboard().set_text(&summary);
+    });
+    header.append(&copy);
     card.append(&header);
+
+    // Identity line: source, login method / plan, organization, and engine
+    // version, when present.
+    {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(src) = p.source.as_deref() {
+            if !src.is_empty() {
+                parts.push(src.to_string());
+            }
+        }
+        if let Some(id) = p.usage.as_ref().and_then(|u| u.identity.as_ref()) {
+            if let Some(method) = id.login_method.as_deref() {
+                if !method.is_empty() {
+                    parts.push(method.to_string());
+                }
+            }
+            if let Some(org) = id.account_organization.as_deref() {
+                if !org.is_empty() {
+                    parts.push(org.to_string());
+                }
+            }
+        }
+        if let Some(version) = p.version.as_deref() {
+            if !version.is_empty() {
+                parts.push(format!("v{}", version.trim_start_matches('v')));
+            }
+        }
+        if !parts.is_empty() {
+            let line = Label::new(Some(&parts.join(" · ")));
+            line.add_css_class("caption");
+            line.add_css_class("dim-label");
+            line.set_halign(Align::Start);
+            line.set_xalign(0.0);
+            card.append(&line);
+        }
+    }
 
     // Error state: show the engine message (e.g. macOS-web ceiling).
     if let Some(err) = &p.error {
@@ -85,7 +139,7 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
         }
     }
 
-    // Credits.
+    // Credits + recent credit events.
     if let Some(c) = &p.credits {
         if c.remaining != 0.0 {
             let credits = Label::new(Some(&format!("Credits: {:.2} left", c.remaining)));
@@ -93,23 +147,148 @@ fn build_card(p: &ProviderPayload) -> GtkBox {
             credits.set_halign(Align::Start);
             card.append(&credits);
         }
-    }
-
-    // Status incident.
-    if let Some(s) = &p.status {
-        if s.is_incident() {
-            let label = s
-                .description
-                .clone()
-                .unwrap_or_else(|| s.indicator.clone());
-            let inc = Label::new(Some(&format!("⚠ {label}")));
-            inc.add_css_class("caption");
-            inc.set_halign(Align::Start);
-            card.append(&inc);
+        for event in c.events.iter().take(3) {
+            if let Some(line) = credit_event_line(event) {
+                let ev = Label::new(Some(&line));
+                ev.add_css_class("caption");
+                ev.add_css_class("dim-label");
+                ev.set_halign(Align::Start);
+                ev.set_wrap(true);
+                ev.set_xalign(0.0);
+                card.append(&ev);
+            }
         }
     }
 
+    // Provider status badge: operational / maintenance / incident, with the
+    // last-updated time and a link to the provider status page when present.
+    if let Some(s) = &p.status {
+        if s.indicator != "none" || s.url.is_some() {
+            append_status(&card, s);
+        }
+    }
+
+    // Last-updated footer from the usage snapshot.
+    if let Some(updated) = p
+        .usage
+        .as_ref()
+        .and_then(|u| u.updated_at.as_deref())
+        .and_then(updated_label)
+    {
+        let footer = Label::new(Some(&updated));
+        footer.add_css_class("caption");
+        footer.add_css_class("dim-label");
+        footer.set_halign(Align::Start);
+        footer.set_xalign(0.0);
+        card.append(&footer);
+    }
+
     card
+}
+
+/// "updated 2m ago" style relative footer from an ISO timestamp.
+fn updated_label(iso: &str) -> Option<String> {
+    let dt = chrono::DateTime::parse_from_rfc3339(iso).ok()?;
+    let secs = (chrono::Utc::now() - dt.with_timezone(&chrono::Utc)).num_seconds();
+    if secs < 0 {
+        return Some("updated just now".to_string());
+    }
+    let rel = if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86_400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86_400)
+    };
+    Some(format!("updated {rel}"))
+}
+
+fn append_status(card: &GtkBox, s: &crate::model::ProviderStatus) {
+    let (glyph, text) = match s.indicator.as_str() {
+        "none" => ("●", "Operational".to_string()),
+        "maintenance" => ("◐", "Under maintenance".to_string()),
+        "minor" | "major" | "critical" => (
+            "⚠",
+            s.description.clone().unwrap_or_else(|| format!("{} incident", s.indicator)),
+        ),
+        other => ("•", s.description.clone().unwrap_or_else(|| other.to_string())),
+    };
+
+    let row = GtkBox::new(Orientation::Horizontal, 6);
+    let badge = Label::new(Some(&format!("{glyph} {text}")));
+    badge.add_css_class("caption");
+    badge.set_halign(Align::Start);
+    row.append(&badge);
+
+    if let Some(updated) = status_updated_label(s.updated_at.as_deref()) {
+        let when = Label::new(Some(&updated));
+        when.add_css_class("dim-label");
+        when.add_css_class("caption");
+        when.set_halign(Align::End);
+        when.set_hexpand(true);
+        row.append(&when);
+    }
+    card.append(&row);
+
+    if let Some(url) = &s.url {
+        let link = gtk4::LinkButton::builder()
+            .uri(url)
+            .label("Open status page")
+            .halign(Align::Start)
+            .has_frame(false)
+            .build();
+        link.add_css_class("caption");
+        card.append(&link);
+    }
+}
+
+fn status_updated_label(updated_at: Option<&str>) -> Option<String> {
+    let iso = updated_at?;
+    let dt = chrono::DateTime::parse_from_rfc3339(iso).ok()?;
+    Some(format!("updated {}", dt.format("%b %d %H:%M")))
+}
+
+fn credit_event_line(e: &crate::model::CreditEvent) -> Option<String> {
+    // Render only events that carry meaningful detail.
+    let used = e.credits_used?;
+    let date = e.date.as_deref().unwrap_or("");
+    let service = e.service.as_deref().unwrap_or("usage");
+    let date_short = date.split('T').next().unwrap_or(date);
+    if date_short.is_empty() {
+        Some(format!("• {service}: {used:.2}"))
+    } else {
+        Some(format!("• {date_short} {service}: {used:.2}"))
+    }
+}
+
+fn summary_line(name: &str, p: &ProviderPayload) -> String {
+    if let Some(err) = &p.error {
+        return format!("{name}: {}", err.message);
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(u) = &p.usage {
+        for (label, win) in [
+            ("session", u.primary.as_ref()),
+            ("weekly", u.secondary.as_ref()),
+            ("extra", u.tertiary.as_ref()),
+        ] {
+            if let Some(w) = win {
+                parts.push(format!("{label} {}% left", w.remaining_percent().round() as i64));
+            }
+        }
+    }
+    if let Some(c) = &p.credits {
+        if c.remaining != 0.0 {
+            parts.push(format!("{:.2} credits", c.remaining));
+        }
+    }
+    if parts.is_empty() {
+        format!("{name}: no usage data")
+    } else {
+        format!("{name}: {}", parts.join(", "))
+    }
 }
 
 fn append_window(card: &GtkBox, name: &str, window: Option<&crate::model::RateWindow>) {
@@ -143,6 +322,14 @@ fn append_window(card: &GtkBox, name: &str, window: Option<&crate::model::RateWi
         r.add_css_class("caption");
         r.set_halign(Align::Start);
         row.append(&r);
+    }
+
+    if let Some(pace) = pace_label(w.used_percent, w.window_minutes, w.resets_at.as_deref()) {
+        let p = Label::new(Some(&pace));
+        p.add_css_class("dim-label");
+        p.add_css_class("caption");
+        p.set_halign(Align::Start);
+        row.append(&p);
     }
 
     card.append(&row);
