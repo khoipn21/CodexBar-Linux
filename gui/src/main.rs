@@ -86,11 +86,26 @@ fn build_ui(
         .default_width(360)
         .default_height(520)
         .build();
-    // Closing the window hides it (tray app keeps running).
-    window.connect_close_request(|w| {
-        w.set_visible(false);
-        glib::Propagation::Stop
-    });
+    // Closing the window hides it (tray app keeps running). Notify once so the
+    // user knows it is still running in the panel tray and how to reopen it —
+    // important on GNOME, where the tray icon needs the AppIndicator extension.
+    {
+        let app = app.clone();
+        let notified_close = Rc::new(RefCell::new(false));
+        window.connect_close_request(move |w| {
+            w.set_visible(false);
+            if !*notified_close.borrow() {
+                *notified_close.borrow_mut() = true;
+                let n = gio::Notification::new("CodexBar is still running");
+                n.set_body(Some(
+                    "CodexBar minimized to the panel tray. Reopen it from the tray icon. \
+On GNOME, enable the AppIndicator extension if the icon is not visible.",
+                ));
+                app.send_notification(Some("codexbar-close-to-tray"), &n);
+            }
+            glib::Propagation::Stop
+        });
+    }
 
     let toolbar = libadwaita::ToolbarView::new();
     let header = libadwaita::HeaderBar::new();

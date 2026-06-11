@@ -2,7 +2,7 @@
 //! delivered to the GTK main loop through a channel of `TrayCommand`.
 
 use crate::icon_renderer::IconPixmap;
-use ksni::{Icon, MenuItem, ToolTip, Tray};
+use ksni::{Category, Icon, MenuItem, Status, ToolTip, Tray};
 use ksni::menu::StandardItem;
 use async_channel::Sender;
 
@@ -49,6 +49,23 @@ impl Tray for CodexBarTray {
 
     fn title(&self) -> String {
         "CodexBar".into()
+    }
+
+    // Keep the item in the "active" status so GNOME's AppIndicator extension
+    // always shows it (PASSIVE items can be hidden by some hosts).
+    fn status(&self) -> Status {
+        Status::Active
+    }
+
+    fn category(&self) -> Category {
+        Category::ApplicationStatus
+    }
+
+    // Themed fallback name. Hosts that cannot render our custom ARGB pixmap
+    // (or that prefer named icons, like GNOME AppIndicator) fall back to this
+    // freedesktop icon instead of showing nothing.
+    fn icon_name(&self) -> String {
+        "utilities-system-monitor-symbolic".into()
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
