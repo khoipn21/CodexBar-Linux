@@ -1,0 +1,54 @@
+name: ci-linux
+
+on:
+  push:
+    branches:
+      - main
+      - feat/**
+  pull_request:
+
+jobs:
+  build-test-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install Swift toolchain prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libgcc-13-dev \
+            libpython3-dev \
+            libstdc++-13-dev \
+            libz3-dev
+
+      - name: Provision Swift toolchain
+        run: ./scripts/setup-swift-toolchain.sh
+
+      - name: Run GUI tests
+        run: |
+          cd gui
+          . ../scripts/gui-build-env.sh
+          cargo test
+
+      - name: Build Linux packages
+        env:
+          CODEXBAR_VERSION: ci-${{ github.sha }}
+          CODEXBAR_ARCH: amd64
+        run: ./scripts/package-linux.sh
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codexbar-linux-${{ github.sha }}
+          path: |
+            out/dist/*.deb
+            out/dist/*.tar.gz
+          if-no-files-found: error

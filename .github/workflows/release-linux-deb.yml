@@ -1,0 +1,85 @@
+name: release-linux-deb
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Derive release version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            tag="${GITHUB_REF_NAME}"
+          else
+            version="0.1.0-dev-${GITHUB_RUN_NUMBER}"
+            tag="linux-dev-${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Install Swift toolchain prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libgcc-13-dev \
+            libpython3-dev \
+            libstdc++-13-dev \
+            libz3-dev
+
+      - name: Provision Swift toolchain
+        run: ./scripts/setup-swift-toolchain.sh
+
+      - name: Build Linux release artifacts
+        env:
+          CODEXBAR_VERSION: ${{ steps.version.outputs.version }}
+          CODEXBAR_ARCH: amd64
+        run: ./scripts/package-linux.sh
+
+      - name: Create release notes
+        run: |
+          cat > release-notes.txt <<EOF
+          Linux release artifacts for CodexBar.
+
+          Files:
+          - codexbar_${{ steps.version.outputs.version }}_amd64.deb
+          - codexbar-linux-${{ steps.version.outputs.version }}-amd64.tar.gz
+          EOF
+
+      - name: Create GitHub release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1 || \
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes-file release-notes.txt
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: release-notes.txt
+          files: |
+            out/dist/*.deb
+            out/dist/*.tar.gz
+          fail_on_unmatched_files: true
