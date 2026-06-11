@@ -34,7 +34,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Install Swift toolchain prerequisites
+      - name: Install build prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -42,10 +42,24 @@ jobs:
             libgcc-13-dev \
             libpython3-dev \
             libstdc++-13-dev \
-            libz3-dev
+            libz3-dev \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            librsvg2-dev \
+            libcairo2-dev \
+            libglib2.0-dev \
+            libpango1.0-dev \
+            libgdk-pixbuf-2.0-dev \
+            libgraphene-1.0-dev \
+            libdbus-1-dev
 
       - name: Provision Swift toolchain
         run: ./scripts/setup-swift-toolchain.sh
+
+      - name: Run GUI tests
+        run: |
+          cd gui
+          cargo test
 
       - name: Build Linux release artifacts
         env:
